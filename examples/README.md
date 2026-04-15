@@ -32,3 +32,8 @@ A UDP client that sends "hello" to a tailnet peer on a configurable interval.
 ### [TCP Echo](tcp_echo)
 
 A TCP server that listens on the tailnet and echoes input back to the sender.
+
+### [SSH Peer Lookup](ssh_peer_lookup)
+
+A TUI app served over an in-process SSH server which allows you to query info about peers on your
+tailnet.

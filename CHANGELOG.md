@@ -6,6 +6,11 @@ Record breaking or significant changes here. All dates are UTC.
 
 Put changes for the upcoming release here!
 
+- Added (Rust API): Experimental support for user-defined tailnet SSH servers using
+  [`russh`](https://docs.rs/russh/latest/russh/) and (optionally)
+  [`ratatui`](https://docs.rs/ratatui/latest/ratatui/).
+  [#178](https://github.com/tailscale/tailscale-rs/pull/178).
+
 ## [0.3.3](https://github.com/tailscale/tailscale-rs/releases/tag/v0.3.3) - 2026-05-20
 
 - Fixed: don't generate `tailscale.h` on publish.
