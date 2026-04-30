@@ -5813,7 +5813,6 @@ dependencies = [
  "tokio",
  "tracing",
  "ts_bart",
- "ts_keys",
  "ts_overlay_router",
  "ts_packet",
  "ts_packetfilter",
@@ -6008,7 +6007,6 @@ dependencies = [
  "itertools",
  "tracing",
  "ts_bart",
- "ts_keys",
  "ts_packet",
  "ts_transport",
 ]
@@ -6081,8 +6079,12 @@ version = "0.3.3"
 dependencies = [
  "futures",
  "ipnet",
+ "itertools",
  "kameo",
  "kameo_actors",
+ "proptest",
+ "rand 0.10.1",
+ "smallvec",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -6099,6 +6101,7 @@ dependencies = [
  "ts_packetfilter_state",
  "ts_transport",
  "ts_transport_derp",
+ "ts_tunnel",
 ]
 
 [[package]]
@@ -6127,7 +6130,6 @@ dependencies = [
 name = "ts_transport"
 version = "0.3.3"
 dependencies = [
- "ts_keys",
  "ts_packet",
 ]
 
@@ -6203,7 +6205,6 @@ dependencies = [
 name = "ts_underlay_router"
 version = "0.3.3"
 dependencies = [
- "ts_keys",
  "ts_packet",
  "ts_transport",
 ]
