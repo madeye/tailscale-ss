@@ -3,7 +3,6 @@
 use std::{
     borrow::Borrow,
     hash::Hash,
-    marker::PhantomData,
     sync::{Arc, RwLockReadGuard, RwLockWriteGuard, TryLockError},
 };
 
@@ -19,7 +18,7 @@ impl<TableStorage: schema::GeneratedStorage> KvStore<TableStorage> {
     /// Start a transaction.
     ///
     /// Blocks until the store's global lock is available for write access.
-    pub fn begin_transaction(&self, owner: Owner) -> Transaction<'_, TableStorage> {
+    pub fn begin_transaction(&self, owner: Owner) -> Transaction<'_, Storage<TableStorage>> {
         Transaction {
             guard: self.storage.write().unwrap(),
             owner,
@@ -29,12 +28,16 @@ impl<TableStorage: schema::GeneratedStorage> KvStore<TableStorage> {
     /// Start a transaction.
     ///
     /// Returns `None` if the store's global lock is unavailable for write access.
-    pub fn try_begin_transaction(&self, owner: Owner) -> Option<Transaction<'_, TableStorage>> {
+    pub fn try_begin_transaction(
+        &self,
+        owner: Owner,
+    ) -> Option<Transaction<'_, Storage<TableStorage>>> {
         let guard = match self.storage.try_write() {
             Ok(g) => g,
             Err(TryLockError::WouldBlock) => return None,
             Err(TryLockError::Poisoned(_)) => panic!(),
         };
+
         Some(Transaction { guard, owner })
     }
 
@@ -42,7 +45,7 @@ impl<TableStorage: schema::GeneratedStorage> KvStore<TableStorage> {
     /// all reads are guaranteed to be atomic).
     ///
     /// Blocks until the store's global lock is available for read access.
-    pub fn begin_ro_transaction(&self, owner: Owner) -> RoTransaction<'_, TableStorage> {
+    pub fn begin_ro_transaction(&self, owner: Owner) -> RoTransaction<'_, Storage<TableStorage>> {
         RoTransaction {
             guard: self.storage.read().unwrap(),
             owner,
@@ -56,7 +59,7 @@ impl<TableStorage: schema::GeneratedStorage> KvStore<TableStorage> {
     pub fn try_begin_ro_transaction(
         &self,
         owner: Owner,
-    ) -> Option<RoTransaction<'_, TableStorage>> {
+    ) -> Option<RoTransaction<'_, Storage<TableStorage>>> {
         let guard = match self.storage.try_read() {
             Ok(g) => g,
             Err(TryLockError::WouldBlock) => return None,
@@ -76,43 +79,42 @@ impl<TableStorage: schema::GeneratedStorage> KvStore<TableStorage> {
 /// ([`Transaction::commit`] can be used for this).
 ///
 /// A transaction must not be kept alive over an `await` point. This can lead to deadlock.
-// TODO do we need to be able to abort a transaction?
-pub struct Transaction<'a, TableStorage: schema::GeneratedStorage> {
-    pub(crate) guard: RwLockWriteGuard<'a, Storage<TableStorage>>,
+pub struct Transaction<'guard, Storage> {
+    pub(crate) guard: RwLockWriteGuard<'guard, Storage>,
     pub(crate) owner: Owner,
 }
 
-impl<'a, TableStorage: schema::GeneratedStorage + 'a> Ops<'a, TableStorage>
-    for &'a Transaction<'a, TableStorage>
+impl<'guard, 'a, TableStorage: schema::GeneratedStorage> Ops<TableStorage>
+    for &'a Transaction<'guard, Storage<TableStorage>>
 {
-    type ReadLock = RefWriteGuard<'a, 'a, Storage<TableStorage>>;
+    type ReadLock = RefWriteGuard<'a, 'guard, Storage<TableStorage>>;
 
     fn read_lock(self) -> Self::ReadLock {
         RefWriteGuard(&self.guard)
     }
 }
 
-impl<'a, TableStorage: schema::GeneratedStorage + 'a> SingletonOps<'a, TableStorage>
-    for &'a Transaction<'a, TableStorage>
+impl<TableStorage: schema::GeneratedStorage> SingletonOps<TableStorage>
+    for &Transaction<'_, Storage<TableStorage>>
 {
 }
 
-impl<'a, 't, TableStorage: schema::GeneratedStorage + 'a> OpsMut<'a, TableStorage>
-    for &'t mut Transaction<'a, TableStorage>
+impl<'guard, 'a, TableStorage: schema::GeneratedStorage> OpsMut<TableStorage>
+    for &'a mut Transaction<'guard, Storage<TableStorage>>
 {
-    type WriteLock = RefWriteGuardMut<'t, 'a, Storage<TableStorage>>;
+    type WriteLock = RefWriteGuardMut<'a, 'guard, Storage<TableStorage>>;
 
     fn write_lock(self) -> Self::WriteLock {
         RefWriteGuardMut(&mut self.guard)
     }
 }
 
-impl<'a, 't, TableStorage: schema::GeneratedStorage + 'a> SingletonOpsMut<'a, 't, TableStorage>
-    for &'t mut Transaction<'a, TableStorage>
+impl<TableStorage: schema::GeneratedStorage> SingletonOpsMut<TableStorage>
+    for &mut Transaction<'_, Storage<TableStorage>>
 {
 }
 
-impl<'a, TableStorage: schema::GeneratedStorage> Transaction<'a, TableStorage> {
+impl<'guard, TableStorage: schema::GeneratedStorage> Transaction<'guard, Storage<TableStorage>> {
     /// Commit this transaction.
     ///
     /// This simply moves and drops the `Transaction` object. It is optional to call and currently
@@ -130,13 +132,10 @@ impl<'a, TableStorage: schema::GeneratedStorage> Transaction<'a, TableStorage> {
     /// let txn = store.begin_ro_transaction(OWNER);
     /// let value = txn.table::<Foo>().get(key).unwrap();
     /// ```
-    pub fn table<'t, D: schema::TableDesc<Storage = TableStorage>>(
-        &'t mut self,
-    ) -> KvTableTransactional<'a, 't, TableStorage, D> {
-        KvTableTransactional {
-            txn: self,
-            table: PhantomData,
-        }
+    pub fn table<D: TableDesc<Storage = TableStorage>>(
+        &mut self,
+    ) -> KvTableTransactional<'guard, '_, D> {
+        KvTableTransactional { txn: self }
     }
 
     /// Access a table via an index.
@@ -150,38 +149,34 @@ impl<'a, TableStorage: schema::GeneratedStorage> Transaction<'a, TableStorage> {
     ///
     /// Here `Foo` describes a tables and `bar` describes an index over `Foo` using the `bar` field
     /// as foreign key.
-    pub fn table_by<'t, D: schema::IndexDesc<Storage = TableStorage>>(
-        &'t mut self,
-    ) -> KvTableTransactionalIndex<'a, 't, TableStorage, D, D::BaseTable> {
-        KvTableTransactionalIndex {
-            txn: self,
-            index: PhantomData,
-            base: PhantomData,
-        }
+    pub fn table_by<D: schema::IndexDesc<Storage = TableStorage>>(
+        &mut self,
+    ) -> KvTableTransactionalIndex<'guard, '_, D> {
+        KvTableTransactionalIndex { txn: self }
     }
 
     /// Get a single value from the store by cloning the value.
     ///
     /// Returns `None` if there is no value for the specified key.
-    pub fn get<D: schema::Singleton>(&'a self) -> Option<D::Value>
+    pub fn get<D: schema::Singleton>(&self) -> Option<D::Value>
     where
         D::Value: Clone,
     {
-        <&Self as SingletonOps<'_, TableStorage>>::get::<D>(self, self.owner)
+        <&Self as SingletonOps<_>>::get::<D>(self, self.owner)
     }
 
     /// Get a single value from the store by cloning an `Arc`.
     ///
     /// Returns `None` if there is no value for the specified key. Panics if the value is not an `Arc`.
-    pub fn get_arc<D: schema::ArcSingleton>(&'a self) -> Option<Arc<D::Value>> {
-        <&Self as SingletonOps<'_, TableStorage>>::get_arc::<D>(self, self.owner)
+    pub fn get_arc<D: schema::ArcSingleton>(&self) -> Option<Arc<D::Value>> {
+        <&Self as SingletonOps<_>>::get_arc::<D>(self, self.owner)
     }
 
     /// Get immutable access to a value in the store by reference.
     ///
     /// Returns `None` (and does not call `f`) if there is no value for the specified key.
-    pub fn with<D: schema::Singleton, T>(&'a self, f: impl FnOnce(&D::Value) -> T) -> Option<T> {
-        <&Self as SingletonOps<'_, TableStorage>>::with::<D, T>(self, f, self.owner)
+    pub fn with<D: schema::Singleton, T>(&self, f: impl FnOnce(&D::Value) -> T) -> Option<T> {
+        <&Self as SingletonOps<_>>::with::<D, T>(self, f, self.owner)
     }
 
     /// Insert a single value into the store.
@@ -189,7 +184,7 @@ impl<'a, TableStorage: schema::GeneratedStorage> Transaction<'a, TableStorage> {
     /// Returns the previous value if there is one, or `None` if there is no value for the specified key.
     // Question: do we need separate insert/update/upsert methods?
     pub fn insert<D: schema::Singleton>(&mut self, value: D::ArgValue) -> Option<D::ArgValue> {
-        <&mut Self as SingletonOpsMut<'_, '_, TableStorage>>::insert::<D>(self, value, self.owner)
+        <&mut Self as SingletonOpsMut<_>>::insert::<D>(self, value, self.owner)
     }
 
     /// Get mutable access to a value in the store.
@@ -199,14 +194,14 @@ impl<'a, TableStorage: schema::GeneratedStorage> Transaction<'a, TableStorage> {
         &mut self,
         f: impl FnOnce(&mut D::Value) -> T,
     ) -> Option<T> {
-        <&mut Self as SingletonOpsMut<'_, '_, TableStorage>>::with_mut::<D, T>(self, f, self.owner)
+        <&mut Self as SingletonOpsMut<_>>::with_mut::<D, T>(self, f, self.owner)
     }
 
     /// Remove a single value from the store.
     ///
     /// Returns the previous value if there is one, or `None` if there is no value for the specified key.
     pub fn remove<D: schema::Singleton>(&mut self) -> Option<D::ArgValue> {
-        <&mut Self as SingletonOpsMut<'_, '_, TableStorage>>::remove::<D>(self, self.owner)
+        <&mut Self as SingletonOpsMut<_>>::remove::<D>(self, self.owner)
     }
 
     /// Remove a single value from the store while preserving ownership of the key/value.
@@ -215,58 +210,44 @@ impl<'a, TableStorage: schema::GeneratedStorage> Transaction<'a, TableStorage> {
     ///
     /// Returns the previous value if there is one, or `None` if there is no value for the specified key.
     pub fn clear<D: schema::Singleton>(&mut self) -> Option<D::ArgValue> {
-        <&mut Self as SingletonOpsMut<'_, '_, TableStorage>>::clear::<D>(self, self.owner)
+        <&mut Self as SingletonOpsMut<_>>::clear::<D>(self, self.owner)
     }
 }
 
 /// Abstracts a table of key/values pairs in the store accessed as part of a transaction.
-pub struct KvTableTransactional<
-    'a,
-    't,
-    TableStorage: schema::GeneratedStorage + 'a,
-    D: schema::TableDesc<Storage = TableStorage>,
-> {
-    txn: &'t mut Transaction<'a, TableStorage>,
-    table: PhantomData<D>,
+pub struct KvTableTransactional<'guard, 'txn, D: TableDesc> {
+    txn: &'txn mut Transaction<'guard, Storage<D::Storage>>,
 }
 
-impl<'a, 't, TableStorage: schema::GeneratedStorage + 'a, D: TableDesc<Storage = TableStorage>>
-    Ops<'a, TableStorage> for &'t KvTableTransactional<'a, 't, TableStorage, D>
+impl<'guard, 'txn, 'table, D: TableDesc> Ops<D::Storage>
+    for &'table KvTableTransactional<'guard, 'txn, D>
 {
-    type ReadLock = RefWriteGuard<'t, 'a, Storage<TableStorage>>;
+    type ReadLock = RefWriteGuard<'table, 'guard, Storage<D::Storage>>;
 
     fn read_lock(self) -> Self::ReadLock {
         RefWriteGuard(&self.txn.guard)
     }
 }
 
-impl<'a, 't, 's, TableStorage: schema::GeneratedStorage + 'a, D: TableDesc<Storage = TableStorage>>
-    OpsMut<'a, TableStorage> for &'s mut KvTableTransactional<'a, 't, TableStorage, D>
+impl<'guard, 'txn, 'table, D: TableDesc> OpsMut<D::Storage>
+    for &'table mut KvTableTransactional<'guard, 'txn, D>
 {
-    type WriteLock = RefWriteGuardMut<'s, 'a, Storage<TableStorage>>;
+    type WriteLock = RefWriteGuardMut<'table, 'guard, Storage<D::Storage>>;
 
     fn write_lock(self) -> Self::WriteLock {
         RefWriteGuardMut(&mut self.txn.guard)
     }
 }
 
-impl<'a, 't, TableStorage: schema::GeneratedStorage + 'a, D: TableDesc<Storage = TableStorage> + 'a>
-    TabularOps<'a, TableStorage, D> for &'t KvTableTransactional<'a, 't, TableStorage, D>
-{
+impl<'guard, D: TableDesc> TabularOps<D::Storage> for &KvTableTransactional<'guard, '_, D> {
+    type TableDesc = D;
 }
 
-impl<'a, 't, TableStorage: schema::GeneratedStorage + 'a, D: TableDesc<Storage = TableStorage>>
-    TabularOpsMut<'a, TableStorage, D> for &mut KvTableTransactional<'a, 't, TableStorage, D>
-{
+impl<'guard, D: TableDesc> TabularOpsMut<D::Storage> for &mut KvTableTransactional<'guard, '_, D> {
+    type TableDesc = D;
 }
 
-impl<
-    'a,
-    't,
-    TableStorage: schema::GeneratedStorage,
-    D: schema::TableDesc<Storage = TableStorage> + 'a,
-> KvTableTransactional<'a, 't, TableStorage, D>
-{
+impl<'guard, D: TableDesc> KvTableTransactional<'guard, '_, D> {
     /// Initialize a table by setting its owner.
     ///
     /// Calling this function is optional, a table can be used without initialization in which case,
@@ -275,45 +256,45 @@ impl<
     /// Returns an error (containing the current owner of the table) if the table has already been
     /// initialized. In this case, the table will be in a consistent state and can be used as normal.
     pub fn init(&mut self) -> Result<()> {
-        <&mut Self as TabularOpsMut<'_, TableStorage, D>>::init(self, self.txn.owner)
+        <&mut Self as TabularOpsMut<_>>::init(self, self.txn.owner)
     }
 
     /// The number of key/value pairs in the table.
-    pub fn len(&'t self) -> usize {
-        <&Self as TabularOps<'_, TableStorage, D>>::len(self)
+    pub fn len(&self) -> usize {
+        <&Self as TabularOps<_>>::len(self)
     }
 
     /// True if the table is empty.
-    pub fn is_empty(&'t self) -> bool {
-        <&Self as TabularOps<'_, TableStorage, D>>::is_empty(self)
+    pub fn is_empty(&self) -> bool {
+        <&Self as TabularOps<_>>::is_empty(self)
     }
 
     /// Clear a table by removing all its KVs, but preserving ownership.
     pub fn clear(&mut self) {
-        <&mut Self as TabularOpsMut<'_, TableStorage, D>>::clear(self, self.txn.owner)
+        <&mut Self as TabularOpsMut<_>>::clear(self, self.txn.owner)
     }
 
     /// Get a row of the table from the store by cloning the value.
     ///
     /// Returns `None` if there is no value for the specified key.
-    pub fn get<Q>(&'t self, key: &Q) -> Option<D::Value>
+    pub fn get<Q>(&self, key: &Q) -> Option<D::Value>
     where
         D::Value: Clone,
         D::Key: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
     {
-        <&Self as TabularOps<'_, TableStorage, D>>::get::<Q>(self, key, self.txn.owner)
+        <&Self as TabularOps<_>>::get::<Q>(self, key, self.txn.owner)
     }
 
     /// Get immutable access to a row of the table in the store by reference.
     ///
     /// Returns `None` (and does not call `f`) if there is no value for the specified key.
-    pub fn with<Q, T>(&'t self, key: &Q, f: impl FnOnce(&D::Value) -> T) -> Option<T>
+    pub fn with<Q, T>(&self, key: &Q, f: impl FnOnce(&D::Value) -> T) -> Option<T>
     where
         D::Key: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
     {
-        <&Self as TabularOps<'_, TableStorage, D>>::with::<Q, T>(self, key, f, self.txn.owner)
+        <&Self as TabularOps<_>>::with::<Q, T>(self, key, f, self.txn.owner)
     }
 
     /// Insert a value into the table.
@@ -323,7 +304,7 @@ impl<
     where
         D::Key: Clone,
     {
-        <&mut Self as TabularOpsMut<'_, TableStorage, D>>::insert(self, key, value, self.txn.owner)
+        <&mut Self as TabularOpsMut<_>>::insert(self, key, value, self.txn.owner)
     }
 
     /// Get mutable access to a row of the table in the store in the store.
@@ -334,7 +315,7 @@ impl<
         D::Key: Borrow<Q>,
         Q: ?Sized + Hash + Eq + ToOwned<Owned = D::Key>,
     {
-        <&mut Self as TabularOpsMut<'_, TableStorage, D>>::with_mut(self, key, f, self.txn.owner)
+        <&mut Self as TabularOpsMut<_>>::with_mut(self, key, f, self.txn.owner)
     }
 
     /// Remove a row from the table.
@@ -345,54 +326,27 @@ impl<
         D::Key: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
     {
-        <&mut Self as TabularOpsMut<'_, TableStorage, D>>::remove(self, key, self.txn.owner)
+        <&mut Self as TabularOpsMut<_>>::remove(self, key, self.txn.owner)
     }
 
     /// Iterate all the key/value pairs in a table.
-    ///
-    /// Clones both keys and values and provides them by-value. To iterate without cloning, see
-    /// [`Self::for_each`].
-    pub fn iter_cloned(&'t self) -> impl Iterator<Item = (D::Key, D::Value)>
-    where
-        D::Key: Clone,
-        D::Value: Clone,
-    {
-        <&Self as TabularOps<'_, TableStorage, D>>::iter_cloned(self, self.txn.owner)
+    pub fn iter(&self) -> impl Iterator<Item = (&D::Key, &D::Value)> {
+        <&Self as TabularOps<_>>::iter(self, self.txn.owner)
     }
 
     /// Iterate all the keys in a table.
-    ///
-    /// Clones the keys and provides them by-value. To iterate without cloning, see
-    /// [`Self::for_each`].
-    pub fn iter_keys_cloned(&'t self) -> impl Iterator<Item = D::Key>
-    where
-        D::Key: Clone,
-    {
-        <&Self as TabularOps<'_, TableStorage, D>>::iter_keys_cloned(self, self.txn.owner)
+    pub fn keys(&self) -> impl Iterator<Item = &D::Key> {
+        <&Self as TabularOps<_>>::keys(self, self.txn.owner)
     }
 
     /// Iterate all the values in a table.
-    ///
-    /// Clones values and provides them by-value. To iterate without cloning, see
-    /// [`Self::for_each`].
-    pub fn iter_values_cloned(&'t self) -> impl Iterator<Item = D::Value>
-    where
-        D::Value: Clone,
-    {
-        <&Self as TabularOps<'_, TableStorage, D>>::iter_values_cloned(self, self.txn.owner)
-    }
-
-    /// Iterate all the key/value pairs in a table.
-    ///
-    /// We're not able to make this an iterator because we have to ensure that the references do
-    /// not outlive our lock on the store. For a (cloning) iterator see [`Self::iter_cloned`].
-    pub fn for_each(&'t self, f: impl FnMut(&D::Key, &D::Value)) {
-        <&Self as TabularOps<'_, TableStorage, D>>::for_each(self, f, self.txn.owner)
+    pub fn values(&self) -> impl Iterator<Item = &D::Value> {
+        <&Self as TabularOps<_>>::values(self, self.txn.owner)
     }
 
     /// Iterate all the key/value pairs in a table. Values are mutable.
     pub fn for_each_mut(&mut self, f: impl FnMut(&D::Key, &mut D::Value)) {
-        <&mut Self as TabularOpsMut<'_, TableStorage, D>>::for_each_mut(self, f, self.txn.owner)
+        <&mut Self as TabularOpsMut<_>>::for_each_mut(self, f, self.txn.owner)
     }
 }
 
@@ -404,42 +358,41 @@ impl<
 /// as possible([`RoTransaction::commit`] can be used for this).
 ///
 /// A transaction must not be kept alive over an `await` point. This can lead to deadlock.
-pub struct RoTransaction<'a, TableStorage: schema::GeneratedStorage> {
-    pub(crate) guard: RwLockReadGuard<'a, Storage<TableStorage>>,
+pub struct RoTransaction<'guard, Storage> {
+    pub(crate) guard: RwLockReadGuard<'guard, Storage>,
     pub(crate) owner: Owner,
 }
 
-impl<'a, TableStorage: schema::GeneratedStorage + 'a> Ops<'a, TableStorage>
-    for &'a RoTransaction<'a, TableStorage>
+impl<'guard, 'txn, TableStorage: schema::GeneratedStorage> Ops<TableStorage>
+    for &'txn RoTransaction<'guard, Storage<TableStorage>>
 {
-    type ReadLock = RefReadGuard<'a, Storage<TableStorage>>;
+    type ReadLock = RefReadGuard<'txn, 'guard, Storage<TableStorage>>;
 
     fn read_lock(self) -> Self::ReadLock {
         RefReadGuard(&self.guard)
     }
 }
 
-impl<'a, TableStorage: schema::GeneratedStorage + 'a> SingletonOps<'a, TableStorage>
-    for &'a RoTransaction<'a, TableStorage>
+impl<'guard, TableStorage: schema::GeneratedStorage> SingletonOps<TableStorage>
+    for &RoTransaction<'guard, Storage<TableStorage>>
 {
 }
 
-impl<'a, TableStorage: schema::GeneratedStorage + 'a, D: TableDesc<Storage = TableStorage>>
-    Ops<'a, TableStorage> for &KvTableRoTransactional<'a, TableStorage, D>
+impl<'guard, 'txn, 'table, D: TableDesc> Ops<D::Storage>
+    for &'table KvTableRoTransactional<'guard, 'txn, D>
 {
-    type ReadLock = RefReadGuard<'a, Storage<TableStorage>>;
+    type ReadLock = RefReadGuard<'table, 'guard, Storage<D::Storage>>;
 
     fn read_lock(self) -> Self::ReadLock {
         RefReadGuard(&self.txn.guard)
     }
 }
 
-impl<'a, TableStorage: schema::GeneratedStorage + 'a, D: TableDesc<Storage = TableStorage> + 'a>
-    TabularOps<'a, TableStorage, D> for &KvTableRoTransactional<'a, TableStorage, D>
-{
+impl<'guard, D: TableDesc> TabularOps<D::Storage> for &KvTableRoTransactional<'guard, '_, D> {
+    type TableDesc = D;
 }
 
-impl<'a, TableStorage: schema::GeneratedStorage> RoTransaction<'a, TableStorage> {
+impl<'guard, TableStorage: schema::GeneratedStorage> RoTransaction<'guard, Storage<TableStorage>> {
     /// Commit this transaction.
     ///
     /// This simply moves and drops the `RoTransaction` object. It is optional to call and currently
@@ -457,13 +410,10 @@ impl<'a, TableStorage: schema::GeneratedStorage> RoTransaction<'a, TableStorage>
     /// let txn = store.begin_ro_transaction(OWNER);
     /// let value = txn.table::<Foo>().get(key).unwrap();
     /// ```
-    pub fn table<D: schema::TableDesc<Storage = TableStorage>>(
-        &'a self,
-    ) -> KvTableRoTransactional<'a, TableStorage, D> {
-        KvTableRoTransactional {
-            txn: self,
-            table: PhantomData,
-        }
+    pub fn table<D: TableDesc<Storage = TableStorage>>(
+        &self,
+    ) -> KvTableRoTransactional<'guard, '_, D> {
+        KvTableRoTransactional { txn: self }
     }
 
     /// Access a table via an index.
@@ -478,126 +428,97 @@ impl<'a, TableStorage: schema::GeneratedStorage> RoTransaction<'a, TableStorage>
     /// Here `Foo` describes a tables and `bar` describes an index over `Foo` using the `bar` field
     /// as foreign key.
     pub fn table_by<D: schema::IndexDesc<Storage = TableStorage>>(
-        &'a self,
-    ) -> KvTableRoTransactionalIndex<'a, TableStorage, D, D::BaseTable> {
-        KvTableRoTransactionalIndex {
-            txn: self,
-            index: PhantomData,
-            base: PhantomData,
-        }
+        &self,
+    ) -> KvTableRoTransactionalIndex<'guard, '_, D> {
+        KvTableRoTransactionalIndex { txn: self }
     }
 
     /// Get a single value from the store by cloning the value.
     ///
     /// Returns `None` if there is no value for the specified key.
-    pub fn get<D: schema::Singleton>(&'a self) -> Option<D::Value>
+    pub fn get<D: schema::Singleton>(&self) -> Option<D::Value>
     where
         D::Value: Clone,
     {
-        <&Self as SingletonOps<'_, TableStorage>>::get::<D>(self, self.owner)
+        <&Self as SingletonOps<_>>::get::<D>(self, self.owner)
     }
 
     /// Get a single value from the store by cloning an `Arc`.
     ///
     /// Returns `None` if there is no value for the specified key. Panics if the value is not an `Arc`.
-    pub fn get_arc<D: schema::ArcSingleton>(&'a self) -> Option<Arc<D::Value>> {
-        <&Self as SingletonOps<'_, TableStorage>>::get_arc::<D>(self, self.owner)
+    pub fn get_arc<D: schema::ArcSingleton>(&self) -> Option<Arc<D::Value>> {
+        <&Self as SingletonOps<_>>::get_arc::<D>(self, self.owner)
     }
 
     /// Get immutable access to a value in the store by reference.
     ///
     /// Returns `None` (and does not call `f`) if there is no value for the specified key.
-    pub fn with<D: schema::Singleton, T>(&'a self, f: impl FnOnce(&D::Value) -> T) -> Option<T> {
-        <&Self as SingletonOps<'_, TableStorage>>::with::<D, T>(self, f, self.owner)
+    pub fn with<D: schema::Singleton, T>(&self, f: impl FnOnce(&D::Value) -> T) -> Option<T> {
+        <&Self as SingletonOps<_>>::with::<D, T>(self, f, self.owner)
     }
 }
 
 /// Abstracts a table of key/values pairs in the store as part of a read-only transaction.
-pub struct KvTableRoTransactional<
-    'a,
-    TableStorage: schema::GeneratedStorage,
-    D: schema::TableDesc<Storage = TableStorage> + 'a,
-> {
-    txn: &'a RoTransaction<'a, TableStorage>,
-    table: PhantomData<D>,
+pub struct KvTableRoTransactional<'guard, 'txn, D: TableDesc> {
+    txn: &'txn RoTransaction<'guard, Storage<D::Storage>>,
 }
 
-impl<'a, TableStorage: schema::GeneratedStorage, D: schema::TableDesc<Storage = TableStorage> + 'a>
-    KvTableRoTransactional<'a, TableStorage, D>
-{
+impl<'guard, D: TableDesc> KvTableRoTransactional<'guard, '_, D> {
     /// The number of key/value pairs in the table.
-    pub fn len(&'a self) -> usize {
-        <&Self as TabularOps<'_, TableStorage, D>>::len(self)
+    pub fn len(&self) -> usize {
+        <&Self as TabularOps<_>>::len(self)
     }
 
     /// True if the table is empty.
-    pub fn is_empty(&'a self) -> bool {
-        <&Self as TabularOps<'_, TableStorage, D>>::is_empty(self)
+    pub fn is_empty(&self) -> bool {
+        <&Self as TabularOps<_>>::is_empty(self)
     }
 
     /// Get a row of the table from the store by cloning the value.
     ///
     /// Returns `None` if there is no value for the specified key.
-    pub fn get<Q>(&'a self, key: &Q) -> Option<D::Value>
+    pub fn get<Q>(&self, key: &Q) -> Option<D::Value>
     where
         D::Value: Clone,
         D::Key: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
     {
-        <&Self as TabularOps<'_, TableStorage, D>>::get::<Q>(self, key, self.txn.owner)
+        <&Self as TabularOps<_>>::get::<Q>(self, key, self.txn.owner)
     }
 
     /// Get immutable access to a row of the table in the store by reference.
     ///
     /// Returns `None` (and does not call `f`) if there is no value for the specified key.
-    pub fn with<Q, T>(&'a self, key: &Q, f: impl FnOnce(&D::Value) -> T) -> Option<T>
+    pub fn with<Q, T>(&self, key: &Q, f: impl FnOnce(&D::Value) -> T) -> Option<T>
     where
         D::Key: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
     {
-        <&Self as TabularOps<'_, TableStorage, D>>::with::<Q, T>(self, key, f, self.txn.owner)
+        <&Self as TabularOps<_>>::with::<Q, T>(self, key, f, self.txn.owner)
     }
 
     /// Iterate all the key/value pairs in a table.
-    ///
-    /// Clones both keys and values and provides them by-value. To iterate without cloning, see
-    /// [`Self::for_each`].
-    pub fn iter_cloned(&'a self) -> impl Iterator<Item = (D::Key, D::Value)>
+    pub fn iter(&self) -> impl Iterator<Item = (&D::Key, &D::Value)>
     where
-        D::Key: Clone,
-        D::Value: Clone,
+        D: 'guard,
     {
-        <&Self as TabularOps<'_, TableStorage, D>>::iter_cloned(self, self.txn.owner)
+        <&Self as TabularOps<_>>::iter(self, self.txn.owner)
     }
 
     /// Iterate all the keys in a table.
-    ///
-    /// Clones the keys and provides them by-value. To iterate without cloning, see
-    /// [`Self::for_each`].
-    pub fn iter_keys_cloned(&'a self) -> impl Iterator<Item = D::Key>
+    pub fn keys(&self) -> impl Iterator<Item = &D::Key>
     where
-        D::Key: Clone,
+        D: 'guard,
     {
-        <&Self as TabularOps<'_, TableStorage, D>>::iter_keys_cloned(self, self.txn.owner)
+        <&Self as TabularOps<_>>::keys(self, self.txn.owner)
     }
 
     /// Iterate all the values in a table.
-    ///
-    /// Clones values and provides them by-value. To iterate without cloning, see
-    /// [`Self::for_each`].
-    pub fn iter_values_cloned(&'a self) -> impl Iterator<Item = D::Value>
+    pub fn values(&self) -> impl Iterator<Item = &D::Value>
     where
-        D::Value: Clone,
+        D: 'guard,
     {
-        <&Self as TabularOps<'_, TableStorage, D>>::iter_values_cloned(self, self.txn.owner)
-    }
-
-    /// Iterate all the key/value pairs in a table.
-    ///
-    /// We're not able to make this an iterator because we have to ensure that the references do
-    /// not outlive our lock on the store. For a (cloning) iterator see [`Self::iter_cloned`].
-    pub fn for_each(&self, f: impl FnMut(&D::Key, &D::Value)) {
-        <&Self as TabularOps<'_, TableStorage, D>>::for_each(self, f, self.txn.owner)
+        <&Self as TabularOps<_>>::values(self, self.txn.owner)
     }
 }
 
@@ -1056,7 +977,7 @@ mod test {
         let store = KvStore::new();
         let mut txn = store.begin_transaction(OWNER);
         let table = txn.table::<Items>();
-        assert_eq!(table.iter_cloned().count(), 0);
+        assert_eq!(table.iter().count(), 0);
     }
 
     #[test]
@@ -1066,11 +987,11 @@ mod test {
         let mut table = txn.table::<Items>();
         table.insert("a", "alpha".to_owned());
         table.insert("b", "beta".to_owned());
-        let mut items: Vec<_> = table.iter_cloned().collect();
+        let mut items: Vec<_> = table.iter().collect();
         items.sort();
         assert_eq!(
             items,
-            vec![("a", "alpha".to_owned()), ("b", "beta".to_owned())]
+            vec![(&"a", &"alpha".to_owned()), (&"b", &"beta".to_owned())]
         );
     }
 
@@ -1080,7 +1001,7 @@ mod test {
         let mut txn = store.begin_transaction(OWNER);
         let table = txn.table::<Items>();
         let mut count = 0;
-        table.for_each(|_, _| count += 1);
+        table.iter().for_each(|_| count += 1);
         assert_eq!(count, 0);
     }
 
@@ -1092,7 +1013,7 @@ mod test {
         table.insert("a", "alpha".to_owned());
         table.insert("b", "beta".to_owned());
         let mut items: Vec<_> = Vec::new();
-        table.for_each(|k, v| items.push((*k, v.clone())));
+        table.iter().for_each(|(k, v)| items.push((*k, v.clone())));
         items.sort();
         assert_eq!(
             items,
@@ -1125,7 +1046,7 @@ mod test {
         let store = KvStore::new();
         let mut txn = store.begin_transaction(OWNER);
         let table = txn.table::<Items>();
-        let keys: Vec<_> = table.iter_keys_cloned().collect();
+        let keys: Vec<_> = table.keys().collect();
         assert!(keys.is_empty());
     }
 
@@ -1136,7 +1057,7 @@ mod test {
         let mut table = txn.table::<Items>();
         table.insert("a", "alpha".to_owned());
         table.insert("b", "beta".to_owned());
-        let mut keys: Vec<_> = table.iter_keys_cloned().collect();
+        let mut keys: Vec<_> = table.keys().copied().collect();
         keys.sort();
         assert_eq!(keys, vec!["a", "b"]);
     }
@@ -1146,7 +1067,7 @@ mod test {
         let store = KvStore::new();
         let mut txn = store.begin_transaction(OWNER);
         let table = txn.table::<Items>();
-        let values: Vec<_> = table.iter_values_cloned().collect();
+        let values: Vec<_> = table.values().collect();
         assert!(values.is_empty());
     }
 
@@ -1157,9 +1078,9 @@ mod test {
         let mut table = txn.table::<Items>();
         table.insert("a", "alpha".to_owned());
         table.insert("b", "beta".to_owned());
-        let mut values: Vec<_> = table.iter_values_cloned().collect();
+        let mut values: Vec<_> = table.values().collect();
         values.sort();
-        assert_eq!(values, vec!["alpha".to_owned(), "beta".to_owned()]);
+        assert_eq!(values, vec!["alpha", "beta"]);
     }
 
     #[test]
@@ -1323,7 +1244,7 @@ mod test {
         let store = KvStore::new();
         let txn = store.begin_ro_transaction(OWNER);
         let table = txn.table::<Items>();
-        assert_eq!(table.iter_cloned().count(), 0);
+        assert_eq!(table.iter().count(), 0);
     }
 
     #[test]
@@ -1333,11 +1254,11 @@ mod test {
         store.table::<Items>(OWNER).insert("b", "beta".to_owned());
         let txn = store.begin_ro_transaction(OWNER);
         let table = txn.table::<Items>();
-        let mut items: Vec<_> = table.iter_cloned().collect();
+        let mut items: Vec<_> = table.iter().collect();
         items.sort();
         assert_eq!(
             items,
-            vec![("a", "alpha".to_owned()), ("b", "beta".to_owned())]
+            vec![(&"a", &"alpha".to_owned()), (&"b", &"beta".to_owned())]
         );
     }
 
@@ -1347,7 +1268,7 @@ mod test {
         let txn = store.begin_ro_transaction(OWNER);
         let table = txn.table::<Items>();
         let mut count = 0;
-        table.for_each(|_, _| count += 1);
+        table.iter().for_each(|_| count += 1);
         assert_eq!(count, 0);
     }
 
@@ -1359,7 +1280,7 @@ mod test {
         let txn = store.begin_ro_transaction(OWNER);
         let table = txn.table::<Items>();
         let mut items: Vec<_> = Vec::new();
-        table.for_each(|k, v| items.push((*k, v.clone())));
+        table.iter().for_each(|(k, v)| items.push((*k, v.clone())));
         items.sort();
         assert_eq!(
             items,
@@ -1372,7 +1293,7 @@ mod test {
         let store = KvStore::new();
         let txn = store.begin_ro_transaction(OWNER);
         let table = txn.table::<Items>();
-        let keys: Vec<_> = table.iter_keys_cloned().collect();
+        let keys: Vec<_> = table.keys().collect();
         assert!(keys.is_empty());
     }
 
@@ -1383,7 +1304,7 @@ mod test {
         store.table::<Items>(OWNER).insert("b", "beta".to_owned());
         let txn = store.begin_ro_transaction(OWNER);
         let table = txn.table::<Items>();
-        let mut keys: Vec<_> = table.iter_keys_cloned().collect();
+        let mut keys: Vec<_> = table.keys().copied().collect();
         keys.sort();
         assert_eq!(keys, vec!["a", "b"]);
     }
@@ -1393,7 +1314,7 @@ mod test {
         let store = KvStore::new();
         let txn = store.begin_ro_transaction(OWNER);
         let table = txn.table::<Items>();
-        let values: Vec<_> = table.iter_values_cloned().collect();
+        let values: Vec<_> = table.values().collect();
         assert!(values.is_empty());
     }
 
@@ -1404,8 +1325,8 @@ mod test {
         store.table::<Items>(OWNER).insert("b", "beta".to_owned());
         let txn = store.begin_ro_transaction(OWNER);
         let table = txn.table::<Items>();
-        let mut values: Vec<_> = table.iter_values_cloned().collect();
+        let mut values: Vec<_> = table.values().collect();
         values.sort();
-        assert_eq!(values, vec!["alpha".to_owned(), "beta".to_owned()]);
+        assert_eq!(values, vec!["alpha", "beta"]);
     }
 }

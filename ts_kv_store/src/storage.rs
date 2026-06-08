@@ -27,6 +27,19 @@ impl<TableStorage: schema::GeneratedStorage> Storage<TableStorage> {
         }
     }
 
+    pub(crate) fn insert_singleton(
+        &mut self,
+        key: TypeId,
+        owner: Owner,
+        value: SinValue,
+    ) -> Option<(Owner, SinValue)> {
+        self.singletons.insert(key, (owner, value))
+    }
+
+    pub(crate) fn remove_singleton(&mut self, key: &TypeId) -> Option<(Owner, SinValue)> {
+        self.singletons.remove(key)
+    }
+
     /// Retrieve a singleton value from the store using the given type-key.
     pub(crate) fn get_singleton_value(&self, key: &TypeId) -> Option<&SinValue> {
         self.singletons.get(key).map(|(_, v)| v)
