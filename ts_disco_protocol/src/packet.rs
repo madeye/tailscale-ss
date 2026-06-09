@@ -76,8 +76,13 @@ where
     CryptState: ?Sized,
 {
     /// Get a ref to the header contained in the packet.
-    pub fn header(&self) -> &Header {
+    pub const fn header(&self) -> &Header {
         &self.header
+    }
+
+    /// Get a ref to the sender's [`DiscoPublicKey`].
+    pub const fn sender_pubkey(&self) -> &DiscoPublicKey {
+        &self.header.sender_pub
     }
 }
 
