@@ -7,7 +7,7 @@ use alloc::{borrow::ToOwned, string::String, vec::Vec};
 use core::{
     fmt::{self, LowerHex, UpperHex},
     net::IpAddr,
-    ops::{Index, IndexMut},
+    ops::{Deref, DerefMut, Index, IndexMut},
     slice::{Iter, IterMut, SliceIndex},
 };
 
@@ -523,6 +523,41 @@ impl AsRef<[u8]> for PacketMut {
         self.contents.as_ref()
     }
 }
+
+impl Deref for Packet {
+    type Target = [u8];
+    fn deref(&self) -> &Self::Target {
+        &self.contents
+    }
+}
+
+impl Deref for PacketMut {
+    type Target = [u8];
+    fn deref(&self) -> &Self::Target {
+        &self.contents
+    }
+}
+
+impl DerefMut for PacketMut {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.contents
+    }
+}
+
+// SAFETY: the underlying buf ptr is on the heap, hence stable. This is only valid because
+// PacketMut's DerefMut::Target is [u8], meaning that the underlying ptr can't be modified through
+// the `deref_mut`ed ref, and `split_to` (which does modify the heap pointer) takes `&mut self`,
+// which is called out by StableDeref docs as being unrestricted other than for DerefMut and Drop.
+unsafe impl stable_deref_trait::StableDeref for PacketMut {}
+
+// SAFETY: the underlying buf ptr is on the heap, hence stable. While the underlying Bytes does also
+// provide split_to, Packet does not, so the pointer can't be modified. But even if it did, this
+// wouldn't cause issues for StableDeref since Packet only implements Deref, and in that case the
+// restriction is that the pointer can't change through &Self (split_to takes &mut self).
+unsafe impl stable_deref_trait::StableDeref for Packet {}
+
+// SAFETY: cloning the underlying bytes just increments a refcount.
+unsafe impl yoke::CloneableCart for Packet {}
 
 impl Buf for PacketMut {
     fn remaining(&self) -> usize {

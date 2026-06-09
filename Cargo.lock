@@ -6101,7 +6101,9 @@ version = "0.3.3"
 dependencies = [
  "bytes",
  "crypto_box",
+ "stable_deref_trait",
  "ts_hexdump",
+ "yoke",
 ]
 
 [[package]]
