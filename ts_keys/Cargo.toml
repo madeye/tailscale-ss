@@ -16,6 +16,7 @@ zerocopy.workspace = true
 serde = { workspace = true, optional = true }
 x25519-dalek.workspace = true
 crypto_box.workspace = true
+zeroize.workspace = true
 
 [features]
 serde = ["dep:serde"]

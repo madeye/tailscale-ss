@@ -90,3 +90,20 @@ create_x25519_keypair_types!(
     /// The X25519 public/private key pair of a Tailscale node.
     NodeKeyPair
 );
+
+#[cfg(test)]
+mod tests {
+    use zeroize::ZeroizeOnDrop;
+
+    use super::*;
+
+    #[test]
+    fn test_zeroize() {
+        fn assert_implements<T: ZeroizeOnDrop>() {}
+
+        assert_implements::<DiscoPrivateKey>();
+        assert_implements::<MachinePrivateKey>();
+        assert_implements::<NetworkLockPrivateKey>();
+        assert_implements::<NodePrivateKey>();
+    }
+}

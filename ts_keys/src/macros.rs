@@ -173,7 +173,7 @@ macro_rules! create_x25519_public_key_type {
 /// Generates a struct that implements all the fields/methods needed by X25519 private keys.
 macro_rules! create_x25519_private_key_type {
     ($(#[$attr:meta])* $private_name:ident, $public_name:ident, $key_prefix:literal) => {
-        _create_x25519_base_key_type!($(#[$attr])* $private_name, $key_prefix);
+        _create_x25519_base_key_type!($(#[$attr])* #[derive(::zeroize::ZeroizeOnDrop)] $private_name, $key_prefix);
 
         impl $private_name {
             /// Generate a new X25519 private key.
