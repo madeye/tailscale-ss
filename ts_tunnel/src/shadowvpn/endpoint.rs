@@ -5,9 +5,10 @@ use ts_keys::{NodeKeyPair, NodePublicKey};
 use ts_packet::PacketMut;
 use ts_time::TimeRange;
 
+use super::crypto::{Cipher, decrypt_packet, encrypt_packet};
+use super::obfs::Obfuscator;
 use crate::config::{PeerConfig, PeerId};
-use crate::crypto::{Cipher, decrypt_packet, encrypt_packet};
-use crate::obfs::Obfuscator;
+use crate::results::{EventResult, RecvResult, SendResult};
 
 /// Minimum decrypted plaintext length we deliver to the local system.
 ///
@@ -243,30 +244,6 @@ impl Endpoint {
     pub fn peer_id(&self, key: NodePublicKey) -> Option<PeerId> {
         self.by_key.get(&key).copied()
     }
-}
-
-/// The outcome of attempting to send packets to peers.
-#[derive(Debug, Default, Eq, PartialEq)]
-pub struct SendResult {
-    /// Wire datagrams to be sent to remote peers.
-    pub to_peers: HashMap<PeerId, Vec<PacketMut>>,
-}
-
-/// The outcome of processing received packets.
-#[derive(Debug, Default, Eq, PartialEq)]
-pub struct RecvResult {
-    /// Valid packets from peers to be delivered locally.
-    pub to_local: HashMap<PeerId, Vec<PacketMut>>,
-    /// Wire datagrams to be sent to remote peers. Always empty for ShadowVPN
-    /// (there is no handshake to respond to), retained for API compatibility.
-    pub to_peers: HashMap<PeerId, Vec<PacketMut>>,
-}
-
-/// The outcome of processing time-based events. Always empty for ShadowVPN.
-#[derive(Debug, Default, Eq, PartialEq)]
-pub struct EventResult {
-    /// Wire datagrams to be sent to remote peers.
-    pub to_peers: HashMap<PeerId, Vec<PacketMut>>,
 }
 
 #[cfg(test)]

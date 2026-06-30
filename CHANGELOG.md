@@ -6,14 +6,18 @@ Record breaking or significant changes here. All dates are UTC.
 
 Put changes for the upcoming release here!
 
-- Changed (`ts_tunnel`): replaced the partial WireGuard implementation with the
-  [ShadowVPN](https://github.com/madeye/shadowvpn) data-plane protocol — a
-  pre-shared-key (PSK) tunnel using the shadowsocks AEAD UDP wire scheme
-  (`salt ++ AEAD`, HKDF-SHA1 `ss-subkey`, zero nonce), with QUIC carrier
-  obfuscation enabled by default. The `Endpoint` API is preserved; the protocol
-  is now stateless (no handshake, session rotation, replay window, or timers).
-  Inbound datagrams carry no session id and are trial-decrypted against each
-  peer's key. `ts_dataplane::DataPlane::wireguard` is renamed to `tunnel`.
+- Changed (`ts_tunnel`): the data-plane protocol is now **pluggable** behind a
+  `Protocol` enum and a common `Endpoint` interface, with two backends:
+  **WireGuard** (the existing partial Noise-IKpsk2 implementation — the default,
+  interoperable with WireGuard peers and therefore with a Tailscale/Headscale
+  control plane) and **[ShadowVPN](https://github.com/madeye/shadowvpn)** (a
+  pre-shared-key tunnel using the shadowsocks AEAD UDP wire scheme —
+  `salt ++ AEAD`, HKDF-SHA1 `ss-subkey`, zero nonce — with optional QUIC carrier
+  obfuscation). `ts_dataplane::DataPlane::wireguard` is renamed to `tunnel`, and
+  `DataPlane::new` now takes a `Protocol`.
+- Added: the data plane selects its protocol via the `TS_DATAPLANE_PROTOCOL`
+  environment variable (`wireguard` | `shadowvpn`), defaulting to WireGuard for
+  Tailscale/Headscale compatibility.
 - Added (`ts_vpn`): a new crate providing runnable ShadowVPN daemons built on
   `ts_tunnel` — `tsvpn-server` and `tsvpn-client` binaries with JSON-plus-CLI
   config and client keepalives. The server is **multi-client**: all peers share

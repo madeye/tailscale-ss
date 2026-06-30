@@ -99,7 +99,7 @@ Crates that communicate with other Tailscale nodes on the tailnet. The data plan
 
 #### Tunneling
 
-  - [`ts_tunnel`](ts_tunnel/src/lib.rs): an implementation of the [ShadowVPN](https://github.com/madeye/shadowvpn) protocol that protects all data plane traffic. It is a pre-shared-key (PSK) tunnel using the shadowsocks AEAD UDP wire scheme, with optional QUIC carrier obfuscation, and replaces the crate's former partial WireGuard implementation.
+  - [`ts_tunnel`](ts_tunnel/src/lib.rs): protects all data plane traffic with a **pluggable** protocol, selected via the `Protocol` enum behind a common `Endpoint` interface. Two backends are provided: **WireGuard** (a partial Noise-IKpsk2 implementation, interoperable with WireGuard peers and therefore with a Tailscale/Headscale control plane &mdash; the default), and **[ShadowVPN](https://github.com/madeye/shadowvpn)** (a pre-shared-key tunnel using the shadowsocks AEAD UDP wire scheme with optional QUIC carrier obfuscation). The data plane chooses one via the `TS_DATAPLANE_PROTOCOL` environment variable.
 
 ### Applications
 

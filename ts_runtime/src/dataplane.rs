@@ -66,7 +66,17 @@ impl kameo::Actor for DataplaneActor {
     type Error = Error;
 
     async fn on_start(env: Self::Args, slf: ActorRef<Self>) -> Result<Self, Self::Error> {
+        // Select the data-plane protocol via `TS_DATAPLANE_PROTOCOL`
+        // (`wireguard` | `shadowvpn`), defaulting to WireGuard for
+        // Tailscale/Headscale compatibility.
+        let protocol = std::env::var("TS_DATAPLANE_PROTOCOL")
+            .ok()
+            .and_then(|v| ts_tunnel::Protocol::from_name(&v))
+            .unwrap_or_default();
+        tracing::info!(protocol = protocol.name(), "data-plane protocol selected");
+
         let dataplane = Arc::new(ts_dataplane::async_tokio::DataPlane::new(
+            protocol,
             env.keys.node_keys.clone(),
         ));
 

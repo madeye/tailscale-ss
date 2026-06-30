@@ -1,57 +1,53 @@
-A secure packet tunnel over UDP.
+A secure packet tunnel over UDP, with a **pluggable** data-plane protocol.
 
-This crate implements the [ShadowVPN](https://github.com/madeye/shadowvpn) data-plane protocol: a
-pre-shared-key (PSK), user-mode VPN that uses the [shadowsocks.org AEAD **UDP** wire
-scheme](https://shadowsocks.org/doc/aead.html), with optional QUIC carrier obfuscation. It replaces
-the WireGuard handshake/session machinery this crate previously contained.
+This crate protects data-plane traffic with one of two interchangeable backends, chosen with the
+[`Protocol`] enum and driven through a common [`Endpoint`] interface:
 
-## Wire protocol
+- **WireGuard** ([`Protocol::Wireguard`], the default) — a partial implementation of
+  [WireGuard](https://www.wireguard.com/): the Noise IKpsk2 handshake, session lifecycle, cookie/MAC
+  reply, and replay protection. Interoperable with other WireGuard clients, including the Tailscale Go
+  client and anything coordinated by a Tailscale or [Headscale](https://github.com/juanfont/headscale)
+  control plane.
+- **ShadowVPN** ([`Protocol::Shadowvpn`]) — the [ShadowVPN](https://github.com/madeye/shadowvpn)
+  protocol: a pre-shared-key (PSK) tunnel using the shadowsocks AEAD **UDP** wire scheme
+  (`salt ++ AEAD`, HKDF-SHA1 `ss-subkey`, all-zero nonce) with optional QUIC carrier obfuscation.
+  Stateless per datagram — no handshake, sessions, or timers. **Not** wire-compatible with WireGuard.
 
-Each plaintext packet maps to exactly one UDP datagram:
+Both ends of a tunnel must use the same protocol. Pick by what you need: WireGuard for
+interoperability with the Tailscale/Headscale ecosystem, or ShadowVPN for an obfuscation-capable PSK
+tunnel.
 
-```text
-[ salt (salt_len bytes) ] ++ [ AEAD ciphertext ++ tag (16 bytes) ]
+```rust,ignore
+use ts_tunnel::{Endpoint, Protocol, NodeKeyPair};
+
+// WireGuard (default; interoperable with Tailscale/Headscale peers):
+let wg = Endpoint::new(Protocol::Wireguard, NodeKeyPair::new());
+// ShadowVPN (PSK + QUIC obfuscation):
+let ss = Endpoint::new(Protocol::Shadowvpn, NodeKeyPair::new());
 ```
 
-* **`salt_len == key_len`** of the cipher: 16 bytes for `aes-128-gcm`, 32 bytes for `aes-256-gcm`
-  and `chacha20-poly1305`. A fresh random salt is generated for every datagram.
-* **Subkey:** `subkey = HKDF-SHA1(ikm = master_key, salt = salt, info = "ss-subkey", L = key_len)`.
-* **Nonce:** the all-zero 12-byte nonce. This is safe because each datagram has a unique random salt
-  and therefore a unique subkey, so the `(subkey, nonce)` pair is never reused.
-* **Master key:** the per-peer pre-shared key (`Psk`). It can also be derived from a password with
-  shadowsocks' `EVP_BytesToKey` (see `evp_bytes_to_key`).
-* **Plaintext:** the opaque packet handed to / from the tunnel. Datagram boundaries are the frame
-  boundaries — no length prefix, no multiplexing, no reassembly, and (deliberately, unlike an
-  ss-proxy) no SOCKS address header.
-
-## Carrier obfuscation
-
-By default datagrams are wrapped to resemble **QUIC 1-RTT short-header** packets (so the carrier
-reads as HTTP/3), shaping the payload to evade naive protocol classification. Both ends must agree;
-a mismatched peer just sees its traffic dropped. Other options are `base64` and `none`. See
-`Obfuscator`. This is cosmetic framing only — it adds no security.
+The two backends share an identical public API ([`Endpoint::upsert_peer`], [`send`](Endpoint::send),
+[`recv`](Endpoint::recv), [`dispatch_events`](Endpoint::dispatch_events),
+[`next_event`](Endpoint::next_event), …), so callers are protocol-agnostic once an endpoint is
+constructed.
 
 ## Sans I/O
 
-This crate is implemented in the [Sans I/O](https://sans-io.readthedocs.io/) style: an `Endpoint`
-processes packets that are provided to it, but it does not juggle network sockets or perform any I/O
-itself. The caller feeds packet bytes into an `Endpoint` and gets back a set of actions to perform
-(transmit encrypted datagrams to a peer, deliver decrypted packets to the local system). Because the
-ShadowVPN protocol is stateless per datagram, there is no handshake, no session rotation, no replay
-window, and no timers.
+This crate is implemented in the [Sans I/O](https://sans-io.readthedocs.io/) style: an [`Endpoint`]
+processes packets provided to it and returns the actions the caller should perform (transmit
+encrypted datagrams to a peer, deliver decrypted packets locally, schedule a timer), but performs no
+socket I/O itself. This decouples each protocol's state machine from the I/O strategy.
 
 ## Security limitations
 
 This crate has not been subjected to a code audit by expert cryptography engineers. Conservatively,
-assume that there could be a critical security hole that exposes your traffic to attackers.
+assume there could be a critical security hole that exposes your traffic to attackers.
 
-The PSK is a symmetric secret shared by both ends; anyone holding it can read and forge traffic, so
-it must be distributed and stored securely. There is no forward secrecy: a compromised PSK exposes
-past and future traffic.
+It operates on packets with no awareness of IP addressing: packets are opaque byte sequences tagged
+by destination/origin peer ID. It does not enforce a 1:1 IP↔peer association or track underlay
+endpoint addresses/roaming — the caller provides those.
 
-This crate operates on packets with no awareness of IP protocols — packets are opaque byte sequences
-to be encrypted/decrypted/dropped. It does not enforce a 1:1 association between an IP address and a
-peer, nor track underlay endpoint addresses or roaming. The caller tags packets to be sent with the
-destination peer ID; received datagrams carry no peer identifier, so they are trial-decrypted against
-each configured peer's key and the AEAD tag authenticates the match. It is up to the caller to
-validate source IPs and route to the correct destination peer.
+The ShadowVPN backend additionally has no forward secrecy: its PSK is a symmetric secret shared by
+both ends, so a compromised PSK exposes past and future traffic, and anyone holding it can read or
+forge traffic. The WireGuard backend performs an authenticated key exchange and does not share these
+properties.

@@ -8,7 +8,7 @@ use ts_packet::PacketMut;
 use ts_packetfilter::{FilterExt, IpProto};
 use ts_time::{Handle, Scheduler};
 use ts_transport::{OverlayTransportId, PeerId, UnderlayTransportId};
-use ts_tunnel::{Endpoint, NodeKeyPair};
+use ts_tunnel::{Endpoint, NodeKeyPair, Protocol};
 use ts_underlay_router as ur;
 
 pub mod async_tokio;
@@ -45,10 +45,11 @@ pub struct DataPlane {
 }
 
 impl DataPlane {
-    /// Creates a new data plane for a tunnel node key.
-    pub fn new(my_key: NodeKeyPair) -> Self {
+    /// Creates a new data plane for a tunnel node key, using the given data-plane
+    /// [`Protocol`] (WireGuard for Tailscale/Headscale compatibility, or ShadowVPN).
+    pub fn new(protocol: Protocol, my_key: NodeKeyPair) -> Self {
         DataPlane {
-            tunnel: Endpoint::new(my_key),
+            tunnel: Endpoint::new(protocol, my_key),
             or_out: Default::default(),
             ur_out: Default::default(),
             src_filter_in: Default::default(),
