@@ -1,9 +1,9 @@
 [package]
 name = "ts_tunnel"
 version.workspace = true
-description = "secure packet tunnel over udp (ShadowVPN PSK + QUIC obfuscation)"
+description = "secure packet tunnel over udp (pluggable WireGuard or ShadowVPN data plane)"
 categories = ["cryptography", "network-programming", "encoding"]
-keywords = ["tailscale", "shadowvpn", "shadowsocks", "tunnel", "udp"]
+keywords = ["tailscale", "wireguard", "shadowvpn", "tunnel", "udp"]
 
 repository.workspace = true
 edition.workspace = true
@@ -15,19 +15,27 @@ rust-version.workspace = true
 ts_keys.workspace = true
 ts_packet.workspace = true
 ts_time.workspace = true
+# WireGuard backend: Noise IKpsk2 handshake.
+ts_noise.workspace = true
 
-# AEAD ciphers (RustCrypto), sharing the `aead` 0.5 traits.
+# AEAD ciphers (RustCrypto), sharing the `aead` 0.5 traits. Used by both
+# backends (ChaCha20-Poly1305) and the ShadowVPN backend (AES-GCM).
 aead.workspace = true
 aes-gcm.workspace = true
 chacha20poly1305.workspace = true
 
-# Key derivation: HKDF-SHA1 subkeys + MD5-based EVP_BytesToKey master key,
-# matching the shadowsocks AEAD UDP scheme.
+# WireGuard backend: BLAKE2 hashing and zerocopy message parsing.
+blake2.workspace = true
+zerocopy.workspace = true
+itertools.workspace = true
+
+# ShadowVPN backend: HKDF-SHA1 subkeys + MD5-based EVP_BytesToKey master key
+# (the shadowsocks AEAD UDP scheme).
 hkdf.workspace = true
 sha1.workspace = true
 md-5.workspace = true
 
-# Randomness (per-datagram salt, QUIC obfs connection id / packet number).
+# Randomness (handshake nonces / per-datagram salt / QUIC obfs ids).
 rand.workspace = true
 
 # Error handling.
@@ -35,6 +43,9 @@ thiserror.workspace = true
 
 # Logging.
 tracing.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
 
 [lints]
 workspace = true

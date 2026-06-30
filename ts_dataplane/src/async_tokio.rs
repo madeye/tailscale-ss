@@ -5,7 +5,7 @@ use std::{collections::HashMap, convert::Infallible, ops::DerefMut, sync::atomic
 use tokio::sync::{Mutex, mpsc};
 use ts_packet::PacketMut;
 use ts_transport::{OverlayTransportId, PeerId, UnderlayTransportId};
-use ts_tunnel::NodeKeyPair;
+use ts_tunnel::{NodeKeyPair, Protocol};
 
 use crate::{EventResult, InboundResult, OutboundResult};
 
@@ -56,15 +56,16 @@ struct PollState {
 }
 
 impl DataPlane {
-    /// Create a new data plane for a tunnel node key.
+    /// Create a new data plane for a tunnel node key, using the given data-plane
+    /// [`Protocol`].
     ///
     /// The caller must configure overlay/underlay output queues for the data plane to be useful,
     /// otherwise all it can do is drop packets.
-    pub fn new(my_key: NodeKeyPair) -> Self {
+    pub fn new(protocol: Protocol, my_key: NodeKeyPair) -> Self {
         let (overlay_up, overlay_down) = mpsc::unbounded_channel();
         let (underlay_down, underlay_up) = mpsc::unbounded_channel();
 
-        let sync = crate::DataPlane::new(my_key);
+        let sync = crate::DataPlane::new(protocol, my_key);
 
         Self {
             underlay_down,

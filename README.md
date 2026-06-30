@@ -76,11 +76,13 @@ important considerations:
 - This implementation contains unaudited cryptography and hasn't undergone a comprehensive security
   analysis. Conservatively, assume there could be a critical security hole meaning anything you send
   or receive could be in the clear on the public Internet.
-- The data plane uses the [ShadowVPN](https://github.com/madeye/shadowvpn) protocol &mdash; a
-  pre-shared-key (PSK) tunnel over the shadowsocks AEAD UDP scheme with optional QUIC obfuscation
-  &mdash; in place of WireGuard. Peers are therefore **not** wire-compatible with the stock Tailscale
-  client: every peer must run `tailscale-rs` and share a PSK. There is no forward secrecy; a
-  compromised PSK exposes past and future traffic.
+- The data plane is **pluggable**. By default it speaks **WireGuard**, so it interoperates with
+  WireGuard peers &mdash; the stock Tailscale client and anything coordinated by a Tailscale or
+  [Headscale](https://github.com/juanfont/headscale) control plane. Alternatively, setting
+  `TS_DATAPLANE_PROTOCOL=shadowvpn` selects the [ShadowVPN](https://github.com/madeye/shadowvpn)
+  protocol &mdash; a pre-shared-key (PSK) tunnel over the shadowsocks AEAD UDP scheme with optional
+  QUIC obfuscation. Both ends must use the same protocol; ShadowVPN is **not** WireGuard-compatible
+  and has no forward secrecy (a compromised PSK exposes past and future traffic).
 - There are no compatibility guarantees at the moment. This is early-days software &mdash; we may
   break dependent code in order to get things right.
 - We currently rely on DERP relays for all communication. Direct connections via NAT holepunching
@@ -127,8 +129,8 @@ These are features that we currently implement:
 - Basics
   - Create TCP and UDP sockets on the tailnet
   - Communicate with peers via public DERP relays
-  - Communicate with other `tailscale-rs` peers (the data plane uses the ShadowVPN protocol &mdash;
-    see [Caveats](#caveats) &mdash; so it is not wire-compatible with the stock Tailscale client)
+  - Communicate with the Tailscale Go client, `tsnet`, and `libtailscale` (WireGuard data plane; a
+    ShadowVPN data plane is also selectable &mdash; see [Caveats](#caveats))
 - Language support
   - Rust API
   - C, Elixir, and Python bindings
