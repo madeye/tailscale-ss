@@ -184,8 +184,8 @@ impl Endpoint {
     /// session id), so each one is obfs-decoded and then trial-decrypted against
     /// each configured peer's master key. The AEAD tag authenticates the match,
     /// so the first peer whose key opens the datagram is the sender. Datagrams
-    /// that no peer can open, or that decode to less than [`MIN_DELIVER_LEN`]
-    /// bytes (keepalives), are dropped.
+    /// that no peer can open, or that decode to fewer than 20 bytes (a runt
+    /// smaller than an IPv4 header, e.g. a keepalive), are dropped.
     pub fn recv(&mut self, packets: impl IntoIterator<Item = PacketMut>) -> RecvResult {
         let mut ret = RecvResult::default();
 
