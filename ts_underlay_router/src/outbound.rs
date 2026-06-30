@@ -8,7 +8,7 @@ use ts_transport::{PeerId, UnderlayTransportId};
 /// Routes packets that originate from the local device.
 #[derive(Default)]
 pub struct Router {
-    /// The transport to use for sending to each wireguard peer.
+    /// The transport to use for sending to each tunnel peer.
     pub table: HashMap<PeerId, UnderlayTransportId>,
 }
 

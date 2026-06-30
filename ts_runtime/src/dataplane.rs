@@ -146,12 +146,12 @@ impl Message<Arc<PeerState>> for DataplaneActor {
     async fn handle(&mut self, msg: Arc<PeerState>, _ctx: &mut Context<Self, Self::Reply>) {
         {
             let mut dp = self.dataplane.inner().await;
-            let wg = &mut dp.wireguard;
+            let tunnel = &mut dp.tunnel;
 
             for &upsert in &msg.upserts {
                 let (_, node) = msg.peers.get(&upsert).unwrap();
 
-                wg.upsert_peer(
+                tunnel.upsert_peer(
                     ts_tunnel::PeerId(upsert.0),
                     ts_tunnel::PeerConfig {
                         key: node.node_key,
@@ -161,7 +161,7 @@ impl Message<Arc<PeerState>> for DataplaneActor {
             }
 
             for delete in &msg.deletions {
-                wg.remove_peer(ts_tunnel::PeerId(delete.0));
+                tunnel.remove_peer(ts_tunnel::PeerId(delete.0));
             }
         }
 

@@ -15,14 +15,14 @@ pub mod async_tokio;
 
 /// A data plane subsystem that can be the subject of timer events.
 pub enum Subsystem {
-    /// The wireguard component.
-    Wireguard,
+    /// The tunnel (ShadowVPN) component.
+    Tunnel,
 }
 
 /// Transforms packets to make tailscale happen.
 pub struct DataPlane {
-    /// Wireguard encryption/decryption.
-    pub wireguard: Endpoint,
+    /// Tunnel (ShadowVPN) encryption/decryption.
+    pub tunnel: Endpoint,
 
     /// Outbound overlay router.
     pub or_out: or::outbound::Router,
@@ -40,22 +40,22 @@ pub struct DataPlane {
     /// Events queued for future processing.
     pub events: Scheduler<Subsystem>,
 
-    /// Next event for the wireguard subsystem.
-    pub wg_next: Option<Handle<Subsystem>>,
+    /// Next event for the tunnel subsystem.
+    pub tunnel_next: Option<Handle<Subsystem>>,
 }
 
 impl DataPlane {
-    /// Creates a new data plane for a wireguard node key.
+    /// Creates a new data plane for a tunnel node key.
     pub fn new(my_key: NodeKeyPair) -> Self {
         DataPlane {
-            wireguard: Endpoint::new(my_key),
+            tunnel: Endpoint::new(my_key),
             or_out: Default::default(),
             ur_out: Default::default(),
             src_filter_in: Default::default(),
             or_in: Default::default(),
             events: Default::default(),
             packet_filter: Arc::new(ts_packetfilter::DropAllFilter),
-            wg_next: None,
+            tunnel_next: None,
         }
     }
 
@@ -67,23 +67,23 @@ impl DataPlane {
             loopback,
         } = self.or_out.route(packets);
 
-        let to_wireguard = to_wireguard
+        let to_tunnel = to_wireguard
             .into_iter()
             .map(|(k, v)| (ts_tunnel::PeerId(k.0), v))
             .collect::<Vec<_>>();
 
         let ts_tunnel::SendResult {
             to_peers: encrypted,
-        } = self.wireguard.send(to_wireguard);
+        } = self.tunnel.send(to_tunnel);
 
         let to_peers = self
             .ur_out
             .route(encrypted.into_iter().map(|(k, v)| (PeerId(k.0), v)));
 
-        if let Some(next) = self.wireguard.next_event()
+        if let Some(next) = self.tunnel.next_event()
             && let Some(prev) = self
-                .wg_next
-                .replace(self.events.add(next, Subsystem::Wireguard))
+                .tunnel_next
+                .replace(self.events.add(next, Subsystem::Tunnel))
         {
             prev.cancel();
         }
@@ -96,7 +96,7 @@ impl DataPlane {
         &mut self,
         packets: impl IntoIterator<Item = PacketMut>,
     ) -> InboundResult {
-        let ts_tunnel::RecvResult { to_local, to_peers } = self.wireguard.recv(packets);
+        let ts_tunnel::RecvResult { to_local, to_peers } = self.tunnel.recv(packets);
 
         let to_local = to_local
             .into_iter()
@@ -187,10 +187,10 @@ impl DataPlane {
         let to_local = self.or_in.route(to_local.flatten());
         let to_peers = self.ur_out.route(to_peers);
 
-        if let Some(next) = self.wireguard.next_event()
+        if let Some(next) = self.tunnel.next_event()
             && let Some(prev) = self
-                .wg_next
-                .replace(self.events.add(next, Subsystem::Wireguard))
+                .tunnel_next
+                .replace(self.events.add(next, Subsystem::Tunnel))
         {
             prev.cancel();
         }
@@ -217,8 +217,8 @@ impl DataPlane {
         let now = Instant::now();
         for event in self.events.dispatch(now) {
             match event {
-                Subsystem::Wireguard => {
-                    let res = self.wireguard.dispatch_events(now);
+                Subsystem::Tunnel => {
+                    let res = self.tunnel.dispatch_events(now);
                     to_peers.extend(
                         res.to_peers
                             .into_iter()
@@ -229,10 +229,10 @@ impl DataPlane {
         }
         let to_peers = self.ur_out.route(to_peers);
 
-        if let Some(next) = self.wireguard.next_event()
+        if let Some(next) = self.tunnel.next_event()
             && let Some(prev) = self
-                .wg_next
-                .replace(self.events.add(next, Subsystem::Wireguard))
+                .tunnel_next
+                .replace(self.events.add(next, Subsystem::Tunnel))
         {
             prev.cancel();
         }
@@ -253,13 +253,13 @@ pub struct OutboundResult {
 pub struct InboundResult {
     /// Decrypted packets to be delivered to overlay transports.
     pub to_local: HashMap<OverlayTransportId, Vec<PacketMut>>,
-    /// Encrypted packets to be sent to wireguard peers by the underlay.
+    /// Encrypted packets to be sent to tunnel peers by the underlay.
     pub to_peers: HashMap<(UnderlayTransportId, PeerId), Vec<PacketMut>>,
 }
 
 /// The result of processing an event.
 #[derive(Default)]
 pub struct EventResult {
-    /// Encrypted packets to be sent to wireguard peers by the underlay.
+    /// Encrypted packets to be sent to tunnel peers by the underlay.
     pub to_peers: HashMap<(UnderlayTransportId, PeerId), Vec<PacketMut>>,
 }

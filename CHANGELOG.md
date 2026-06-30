@@ -6,6 +6,20 @@ Record breaking or significant changes here. All dates are UTC.
 
 Put changes for the upcoming release here!
 
+- Changed (`ts_tunnel`): replaced the partial WireGuard implementation with the
+  [ShadowVPN](https://github.com/madeye/shadowvpn) data-plane protocol — a
+  pre-shared-key (PSK) tunnel using the shadowsocks AEAD UDP wire scheme
+  (`salt ++ AEAD`, HKDF-SHA1 `ss-subkey`, zero nonce), with QUIC carrier
+  obfuscation enabled by default. The `Endpoint` API is preserved; the protocol
+  is now stateless (no handshake, session rotation, replay window, or timers).
+  Inbound datagrams carry no session id and are trial-decrypted against each
+  peer's key. `ts_dataplane::DataPlane::wireguard` is renamed to `tunnel`.
+- Added: a Docker end-to-end test for the data plane under `docker/`
+  (`docker/run-e2e.sh`), plus the `ts_tunnel` `tunnel_node` example it drives. It
+  runs a server and a client container, each with its own TUN device, and pings
+  through the encrypted tunnel; it passes for every cipher (`aes-128-gcm`,
+  `aes-256-gcm`, `chacha20-poly1305`) and obfuscation mode (`none`, `quic`,
+  `base64`).
 - Added (Rust API): Experimental support for user-defined tailnet SSH servers using
   [`russh`](https://docs.rs/russh/latest/russh/) and (optionally)
   [`ratatui`](https://docs.rs/ratatui/latest/ratatui/).

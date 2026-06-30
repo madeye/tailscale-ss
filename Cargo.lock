@@ -2807,6 +2807,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 
 [[package]]
+name = "md-5"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf"
+dependencies = [
+ "cfg-if",
+ "digest 0.10.7",
+]
+
+[[package]]
 name = "md5"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5135,7 +5145,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -6245,23 +6255,21 @@ name = "ts_tunnel"
 version = "0.3.3"
 dependencies = [
  "aead 0.5.2",
- "base64 0.22.1",
- "blake2",
- "bytes",
+ "aes-gcm 0.10.3",
  "chacha20poly1305",
  "clap",
- "hex",
- "itertools",
- "proptest",
+ "hkdf 0.12.4",
+ "md-5",
  "rand 0.10.1",
+ "sha1 0.10.6",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
  "ts_cli_util",
  "ts_keys",
- "ts_noise",
  "ts_packet",
  "ts_time",
- "zerocopy",
+ "tun-rs",
 ]
 
 [[package]]
