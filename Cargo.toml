@@ -253,6 +253,10 @@ workspace = true
 # listener.
 axum = ["dep:axum"]
 ssh = ["dep:russh", "dep:bytes", "dep:ratatui"]
+# Fetch the control server's machine key over the control URL's own scheme
+# (plain http allowed) instead of forcing https. For testing against a local
+# control server (e.g. a plain-HTTP Headscale); do not enable in production.
+insecure-keyfetch = ["ts_control/insecure-keyfetch"]
 
 [[example]]
 name = "axum"
@@ -263,6 +267,9 @@ name = "peer_ping"
 
 [[example]]
 name = "tcp_echo"
+
+[[example]]
+name = "tcp_probe"
 
 [[example]]
 name = "ssh_peer_lookup"

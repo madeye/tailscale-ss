@@ -18,6 +18,13 @@ Put changes for the upcoming release here!
 - Added: the data plane selects its protocol via the `TS_DATAPLANE_PROTOCOL`
   environment variable (`wireguard` | `shadowvpn`), defaulting to WireGuard for
   Tailscale/Headscale compatibility.
+- Added: a Headscale integration test under `docker/headscale/`
+  (`run-headscale-e2e.sh`) plus a `tcp_probe` example. It registers two nodes
+  against a local Headscale control plane and asserts a TCP echo round-trip over
+  the selected data plane (relayed via DERP) — verified passing for both
+  `shadowvpn` and `wireguard`. Also adds an opt-in `insecure-keyfetch` crate
+  feature that allows fetching the control machine key over plain `http://`
+  (for local control servers; not for production).
 - Added (`ts_vpn`): a new crate providing runnable ShadowVPN daemons built on
   `ts_tunnel` — `tsvpn-server` and `tsvpn-client` binaries with JSON-plus-CLI
   config and client keepalives. The server is **multi-client**: all peers share
