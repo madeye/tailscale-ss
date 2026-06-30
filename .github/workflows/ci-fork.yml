@@ -1,0 +1,96 @@
+# CI for the `madeye/tailscale-ss` fork, running on GitHub-hosted runners.
+#
+# The upstream workflows (ci.yml, c.yml, elixir.yml, nix.yml, python.yml) target
+# Tailscale's self-hosted runner pool (`linux-x86_64-16cpu`, `macos-26`, ...),
+# which doesn't exist on this fork, so they never run here. This workflow
+# provides equivalent core checks — format, clippy, build, test, the custom
+# `checks` crate, docs — plus the Docker end-to-end test for the ShadowVPN data
+# plane, all on standard `ubuntu-latest` runners.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: rust (fmt, clippy, test)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # `ts_python` (pyo3) links against libpython when built/tested as part of
+      # the workspace, so the dev headers must be present.
+      - name: Install Python dev headers
+        run: sudo apt-get update && sudo apt-get install -y python3-dev
+
+      # rust-toolchain.toml pins the toolchain (1.95.0) and its components
+      # (rustfmt, clippy); `rustup show` installs it if the runner ships another.
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup show
+          cargo --version
+          rustfmt --version
+          cargo clippy --version
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Format (cargo fmt --check)
+        run: cargo fmt --all -- --check
+
+      # Split lib from other targets so the strict missing-docs lint only applies
+      # to public-API surfaces, matching the upstream ci.yml.
+      - name: Lint lib targets (cargo clippy)
+        run: cargo clippy --workspace --all-features --no-deps --lib -- -D warnings
+
+      - name: Lint other targets (cargo clippy)
+        run: cargo clippy --workspace --all-features --no-deps --bins --tests --benches --examples -- -D warnings -A missing_docs
+
+      - name: Build (cargo build --all-targets)
+        run: cargo build --workspace --all-features --all-targets
+
+      - name: Test (cargo test)
+        run: cargo test --workspace --all-features
+
+      - name: Custom workspace checks (cargo run -p checks)
+        run: cargo run -p checks
+
+      - name: Docs (cargo doc)
+        run: cargo doc --workspace --all-features --no-deps
+
+  e2e:
+    name: docker e2e (ShadowVPN data plane)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Build the image once (first run), then exercise the tunnel across every
+      # cipher and obfuscation mode; later runs reuse the cached image layers.
+      - name: End-to-end tunnel tests (all ciphers + obfs modes)
+        run: |
+          set -euo pipefail
+          ./docker/run-e2e.sh chacha20-poly1305
+          ./docker/run-e2e.sh aes-256-gcm
+          OBFS=base64 ./docker/run-e2e.sh aes-128-gcm
+          OBFS=none ./docker/run-e2e.sh chacha20-poly1305
