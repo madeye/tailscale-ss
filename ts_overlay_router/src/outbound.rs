@@ -16,7 +16,10 @@ pub enum RouteAction {
     /// to notch out a set of addresses from a larger route.
     Drop,
 
-    /// Send to a wireguard peer.
+    /// Send to a peer over the encrypted data-plane tunnel (ShadowVPN).
+    ///
+    /// (The `Wireguard` name is retained for API compatibility; the data plane
+    /// now uses the ShadowVPN protocol rather than WireGuard.)
     Wireguard(PeerId),
 
     /// Loop the packet back to a local overlay transport.
@@ -34,7 +37,7 @@ pub struct Router {
 /// The result of routing a batch of packets.
 #[derive(Debug, Default, Eq, PartialEq)]
 pub struct Result {
-    /// Packets to send through wireguard.
+    /// Packets to send through the encrypted data-plane tunnel (ShadowVPN).
     pub to_wireguard: HashMap<PeerId, Vec<PacketMut>>,
     /// Packets to return to a local transport.
     pub loopback: HashMap<OverlayTransportId, Vec<PacketMut>>,
