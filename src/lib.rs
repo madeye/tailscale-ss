@@ -112,8 +112,8 @@
 //!   authorization/authentication, configuration, and streaming updates.
 //! - [ts_dataplane](https://docs.rs/ts_dataplane): wires all the individual data plane functions together,
 //!   flowing inbound and outbound packets through the components in the correct order.
-//! - [ts_tunnel](https://docs.rs/ts_tunnel): a partial implementation of the WireGuard specification
-//!   that protects all data plane traffic, and is interoperable with other WireGuard clients, including Tailscale clients.
+//! - [ts_tunnel](https://docs.rs/ts_tunnel): an implementation of the ShadowVPN protocol (a pre-shared-key,
+//!   shadowsocks AEAD UDP scheme with optional QUIC obfuscation) that protects all data plane traffic.
 //! - [ts_cli_util](https://docs.rs/ts_cli_util): helpers for writing command line tools and initializing
 //!   logging, used in examples.
 //! - [ts_disco_protocol](https://docs.rs/ts_disco_protocol): incomplete implementation of Tailscale's

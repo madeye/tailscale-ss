@@ -1,17 +1,15 @@
 #![doc = include_str!("../README.md")]
 
 mod config;
+mod crypto;
 mod endpoint;
-mod handshake;
-mod macs;
-mod messages;
-mod replay;
-mod session;
-mod time;
+mod obfs;
 
 pub use ts_keys::{NodeKeyPair, NodePrivateKey, NodePublicKey};
 
 pub use crate::{
     config::{PeerConfig, PeerId, Psk},
-    endpoint::{Endpoint, Event, EventResult, RecvResult, SendResult},
+    crypto::{Cipher, CryptoError, decrypt_packet, encrypt_packet, evp_bytes_to_key},
+    endpoint::{Endpoint, EventResult, RecvResult, SendResult},
+    obfs::{Obfuscator, QuicObfs},
 };

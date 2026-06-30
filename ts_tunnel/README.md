@@ -1,55 +1,57 @@
 A secure packet tunnel over UDP.
 
-This crate implements _part_ of [WireGuard](https://www.wireguard.com/), specifically the handshake cryptography and
-general session lifecycle of an endpoint communicating to multiple peers.
+This crate implements the [ShadowVPN](https://github.com/madeye/shadowvpn) data-plane protocol: a
+pre-shared-key (PSK), user-mode VPN that uses the [shadowsocks.org AEAD **UDP** wire
+scheme](https://shadowsocks.org/doc/aead.html), with optional QUIC carrier obfuscation. It replaces
+the WireGuard handshake/session machinery this crate previously contained.
 
-DO NOT USE THIS CRATE if you are looking for a complete WireGuard implementation. This is a building block that lacks
-several of WireGuard's security properties and features, which _you_ must provide. If you're looking for a
-complete implementation, please consult [the WireGuard website](https://www.wireguard.com) for up-to-date documentation
-on available implementations and how to use them.
+## Wire protocol
+
+Each plaintext packet maps to exactly one UDP datagram:
+
+```text
+[ salt (salt_len bytes) ] ++ [ AEAD ciphertext ++ tag (16 bytes) ]
+```
+
+* **`salt_len == key_len`** of the cipher: 16 bytes for `aes-128-gcm`, 32 bytes for `aes-256-gcm`
+  and `chacha20-poly1305`. A fresh random salt is generated for every datagram.
+* **Subkey:** `subkey = HKDF-SHA1(ikm = master_key, salt = salt, info = "ss-subkey", L = key_len)`.
+* **Nonce:** the all-zero 12-byte nonce. This is safe because each datagram has a unique random salt
+  and therefore a unique subkey, so the `(subkey, nonce)` pair is never reused.
+* **Master key:** the per-peer pre-shared key (`Psk`). It can also be derived from a password with
+  shadowsocks' `EVP_BytesToKey` (see `evp_bytes_to_key`).
+* **Plaintext:** the opaque packet handed to / from the tunnel. Datagram boundaries are the frame
+  boundaries — no length prefix, no multiplexing, no reassembly, and (deliberately, unlike an
+  ss-proxy) no SOCKS address header.
+
+## Carrier obfuscation
+
+By default datagrams are wrapped to resemble **QUIC 1-RTT short-header** packets (so the carrier
+reads as HTTP/3), shaping the payload to evade naive protocol classification. Both ends must agree;
+a mismatched peer just sees its traffic dropped. Other options are `base64` and `none`. See
+`Obfuscator`. This is cosmetic framing only — it adds no security.
 
 ## Sans I/O
 
-This crate is implemented in the [Sans I/O](https://sans-io.readthedocs.io/) style: an `Endpoint` can process packets
-that are provided to it, but it does not juggle network sockets or perform any I/O itself. The caller feeds packet bytes
-into an `Endpoint`, and gets back a set of actions that it should perform (e.g. deliver decrypted packets to the local
-system, transmit encrypted packets to a peer, schedule a timeout callback).
-
-This separation decouples the protocol's state machine from the minutia of performing I/O, and allows the caller to
-select the appropriate I/O strategy for their needs (e.g. std::thread, tokio, embassy, pcap replay, in-memory unit
-tests).
+This crate is implemented in the [Sans I/O](https://sans-io.readthedocs.io/) style: an `Endpoint`
+processes packets that are provided to it, but it does not juggle network sockets or perform any I/O
+itself. The caller feeds packet bytes into an `Endpoint` and gets back a set of actions to perform
+(transmit encrypted datagrams to a peer, deliver decrypted packets to the local system). Because the
+ShadowVPN protocol is stateless per datagram, there is no handshake, no session rotation, no replay
+window, and no timers.
 
 ## Security limitations
 
-This crate has not yet been subjected to a code audit by expert cryptography engineers. Conservatively, assume that
-there could be a critical security hole that exposes your traffic to attackers.
+This crate has not been subjected to a code audit by expert cryptography engineers. Conservatively,
+assume that there could be a critical security hole that exposes your traffic to attackers.
 
-As stated above, this crate by itself is NOT a complete implementation of WireGuard, and should not be used as one.
+The PSK is a symmetric secret shared by both ends; anyone holding it can read and forge traffic, so
+it must be distributed and stored securely. There is no forward secrecy: a compromised PSK exposes
+past and future traffic.
 
-In particular, this crate operates on packets with no awareness of IP protocols. Packets are opaque byte sequences to
-be encrypted/decrypted/queued/dropped as specified by the session and handshake state machines. This means that this
-crate does not implement aspects of WireGuard that requires awareness of IP addressing. These aspects must be provided
-by the caller to be a complete implementation of the protocol:
-
-### Cryptokey routing
-
-A complete WireGuard implementation enforces a 1:1 association between an IP address and a peer's cryptographic
-identity: received packets must be sourced from an allowed IP of the sending peer, and transmitted packets are
-automatically routed to the correct peer based on destination IP.
-
-This crate does _not_ enforce this unique association. The caller tags packets to be sent with the destination peer ID,
-and received packets are similarly tagged with the originating peer ID. It is up to the caller to select the correct
-peer when sending, and to validate the source IP when receiving.
-
-### Underlay addressing & roaming
-
-A complete WireGuard implementation tracks the underlay IP address for each peer, so that it knows where on the internet
-to send handshakes and encapsulated packets. Additionally, it allows the peer to roam to a new address mid-session, by
-remembering the last endpoint address from which a valid message was received, and transmitting future packets to that
-address.
-
-This crate does not deal with underlay networking in any way. Wire messages to be sent are tagged by destination peer
-ID, and it is up to the caller to track endpoint location and deliver the packet appropriately. This is a useful
-separation of concerns for Tailscale, since we provide more complex underlay network routing with additional features
-(e.g. path discovery with NAT traversal, fallback relaying through DERP) that should be kept separate from the core
-cryptographic state machines.
+This crate operates on packets with no awareness of IP protocols — packets are opaque byte sequences
+to be encrypted/decrypted/dropped. It does not enforce a 1:1 association between an IP address and a
+peer, nor track underlay endpoint addresses or roaming. The caller tags packets to be sent with the
+destination peer ID; received datagrams carry no peer identifier, so they are trial-decrypted against
+each configured peer's key and the AEAD tag authenticates the match. It is up to the caller to
+validate source IPs and route to the correct destination peer.

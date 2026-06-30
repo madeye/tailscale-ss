@@ -1,0 +1,42 @@
+# Docker-based end-to-end test for the ShadowVPN data plane (ts_tunnel).
+#
+# Spins up a server and a client container on a private bridge network, each
+# with its own TUN device, and lets the client probe connectivity through the
+# encrypted tunnel. Run it with docker/run-e2e.sh, or directly:
+#
+#   docker compose -f docker/docker-compose.yml up --build \
+#       --abort-on-container-exit --exit-code-from client
+#
+# Both containers need NET_ADMIN (to configure the TUN interface) and access to
+# /dev/net/tun (to create it).
+
+# Shared definition for both roles: same image, same TUN privileges, same
+# password / cipher / obfs (overridable from the environment for matrix runs).
+x-tunnel: &tunnel
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile
+  image: ts-tunnel-e2e:latest
+  cap_add:
+    - NET_ADMIN
+  devices:
+    - /dev/net/tun
+  environment:
+    PASSWORD: ${PASSWORD:-correct horse battery staple}
+    CIPHER: ${CIPHER:-chacha20-poly1305}
+    OBFS: ${OBFS:-quic}
+    RUST_LOG: ${RUST_LOG:-info}
+
+services:
+  server:
+    <<: *tunnel
+    container_name: ts-tunnel-server
+    command: ["run-server.sh"]
+
+  client:
+    <<: *tunnel
+    container_name: ts-tunnel-client
+    depends_on:
+      - server
+    # The client resolves the `server` service name via Docker's embedded DNS.
+    command: ["test-client.sh"]

@@ -56,7 +56,7 @@ struct PollState {
 }
 
 impl DataPlane {
-    /// Create a new data plane for a wireguard node key.
+    /// Create a new data plane for a tunnel node key.
     ///
     /// The caller must configure overlay/underlay output queues for the data plane to be useful,
     /// otherwise all it can do is drop packets.

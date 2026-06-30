@@ -1,0 +1,4 @@
+# Keep the Docker build context small: the image only needs source + manifests.
+target/
+.git/
+**/*.swp
