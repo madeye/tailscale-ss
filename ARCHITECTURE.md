@@ -101,6 +101,10 @@ Crates that communicate with other Tailscale nodes on the tailnet. The data plan
 
   - [`ts_tunnel`](ts_tunnel/src/lib.rs): an implementation of the [ShadowVPN](https://github.com/madeye/shadowvpn) protocol that protects all data plane traffic. It is a pre-shared-key (PSK) tunnel using the shadowsocks AEAD UDP wire scheme, with optional QUIC carrier obfuscation, and replaces the crate's former partial WireGuard implementation.
 
+### Applications
+
+  - [`ts_vpn`](ts_vpn/README.md): standalone `tsvpn-server` and `tsvpn-client` daemons built on `ts_tunnel`, forming a complete multi-client ShadowVPN. This is independent of the embedded `tailscale` data plane above; it wires the tunnel protocol to a TUN device and a UDP socket, with the server demultiplexing clients by inner tunnel IP. The Docker end-to-end tests under [`docker/`](docker/README.md) exercise it.
+
 ### Utilities
 
 Crates used throughout the codebase that provide generic algorithms, data structures, cross-cutting concerns, or development tooling.

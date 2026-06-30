@@ -1,0 +1,66 @@
+# Multi-client end-to-end test for the ShadowVPN data plane (ts_vpn).
+#
+# Starts a server and TWO clients with distinct tunnel IPs (10.9.0.2, 10.9.0.3)
+# on a private bridge. `client1` is a long-running daemon whose healthcheck pings
+# the server through the tunnel; `client2` only starts once `client1` is healthy
+# and then runs its own ping test. So a green run proves the server is serving
+# two distinct clients simultaneously, demultiplexing them by inner tunnel IP.
+#
+#   docker compose -f docker/docker-compose.multi.yml up --build \
+#       --abort-on-container-exit --exit-code-from client2
+
+x-tunnel: &tunnel
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile
+  image: ts-tunnel-e2e:latest
+  cap_add:
+    - NET_ADMIN
+  devices:
+    - /dev/net/tun
+
+services:
+  server:
+    <<: *tunnel
+    container_name: ts-tunnel-server-multi
+    command: ["run-server.sh"]
+    environment:
+      PASSWORD: ${PASSWORD:-correct horse battery staple}
+      CIPHER: ${CIPHER:-chacha20-poly1305}
+      OBFS: ${OBFS:-quic}
+      RUST_LOG: ${RUST_LOG:-info}
+
+  client1:
+    <<: *tunnel
+    container_name: ts-tunnel-client1
+    depends_on:
+      - server
+    command: ["run-client.sh"]
+    environment:
+      PASSWORD: ${PASSWORD:-correct horse battery staple}
+      CIPHER: ${CIPHER:-chacha20-poly1305}
+      OBFS: ${OBFS:-quic}
+      RUST_LOG: ${RUST_LOG:-info}
+      CLIENT_TUN_IP: 10.9.0.2
+    healthcheck:
+      test: ["CMD-SHELL", "ping -c1 -W1 10.9.0.1 >/dev/null 2>&1"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 3s
+
+  client2:
+    <<: *tunnel
+    container_name: ts-tunnel-client2
+    depends_on:
+      server:
+        condition: service_started
+      client1:
+        condition: service_healthy
+    command: ["test-client.sh"]
+    environment:
+      PASSWORD: ${PASSWORD:-correct horse battery staple}
+      CIPHER: ${CIPHER:-chacha20-poly1305}
+      OBFS: ${OBFS:-quic}
+      RUST_LOG: ${RUST_LOG:-info}
+      CLIENT_TUN_IP: 10.9.0.3

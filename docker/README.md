@@ -1,22 +1,21 @@
-# Docker end-to-end test
+# Docker end-to-end tests
 
-A full data-path test for the ShadowVPN data plane (`ts_tunnel`). It builds the
-[`tunnel_node`](../ts_tunnel/examples/tunnel_node.rs) example, starts a
-**server** and a **client** container — each with its own TUN device — on a
-private bridge network, and then pings the server's in-tunnel address
-(`10.9.0.1`) from the client.
+Full data-path tests for the ShadowVPN data plane, driving the real
+[`tsvpn-server`](../ts_vpn) and [`tsvpn-client`](../ts_vpn) binaries. Each test
+builds the image, starts containers — each with its own TUN device — on a
+private bridge, and pings through the encrypted tunnel.
 
 A successful, lossless ping exercises the entire path:
 
 ```
-TUN -> Endpoint::send -> obfs(salt ++ AEAD) -> UDP -> server
-    -> Endpoint::recv -> server TUN -> kernel reply -> ... -> back to the client
+TUN -> seal(salt ++ AEAD, obfs) -> UDP -> server -> open -> server TUN
+    -> kernel reply -> ... -> back to the client
 ```
 
-so it proves encryption, QUIC obfuscation, peer-address learning, and the relay
+so it proves encryption, QUIC obfuscation, peer/inner-IP routing, and the relay
 loops all work together.
 
-## Running
+## Single-client
 
 ```sh
 ./docker/run-e2e.sh                 # default cipher (chacha20-poly1305), quic obfs
@@ -25,16 +24,31 @@ OBFS=none ./docker/run-e2e.sh       # disable carrier obfuscation
 OBFS=base64 ./docker/run-e2e.sh aes-128-gcm
 ```
 
-The containers need `NET_ADMIN` and `/dev/net/tun` (the compose file requests
-both). The script exits non-zero if connectivity through the tunnel fails, so it
-doubles as a CI gate.
+## Multi-client
+
+Starts a server and **two** clients with distinct tunnel IPs (`10.9.0.2`,
+`10.9.0.3`). `client1` is a long-running daemon whose healthcheck pings the
+server; `client2` only starts once `client1` is healthy and then runs its own
+ping test — so a green run proves the server serves two clients at once,
+demultiplexing them by inner tunnel IP.
+
+```sh
+./docker/run-e2e-multi.sh                 # default cipher, quic obfs
+./docker/run-e2e-multi.sh aes-256-gcm
+```
+
+The containers need `NET_ADMIN` and `/dev/net/tun` (the compose files request
+both). Each script exits non-zero if connectivity through the tunnel fails, so
+they double as CI gates.
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `Dockerfile` | Builds the `tunnel_node` example; runtime image with `iproute2` + `ping`. |
-| `docker-compose.yml` | Server + client services sharing the image and TUN privileges. |
+| `Dockerfile` | Builds `tsvpn-server` + `tsvpn-client`; runtime image with `iproute2` + `ping`. |
+| `docker-compose.yml` | Single-client: server + one client-under-test. |
+| `docker-compose.multi.yml` | Multi-client: server + two clients (healthcheck-gated). |
 | `run-server.sh` | Server entry point (binds UDP, brings up `10.9.0.1`). |
-| `test-client.sh` | Client entry point: brings up `10.9.0.2`, pings the server, sets the exit code. |
-| `run-e2e.sh` | Orchestrates `docker compose up` and returns the client's verdict. |
+| `run-client.sh` | Foreground client daemon (env-driven tunnel IP). |
+| `test-client.sh` | Brings up a client, pings the server, sets the exit code. |
+| `run-e2e.sh` / `run-e2e-multi.sh` | Orchestrate `docker compose up` and return the client's verdict. |

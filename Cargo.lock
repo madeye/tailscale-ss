@@ -6257,19 +6257,15 @@ dependencies = [
  "aead 0.5.2",
  "aes-gcm 0.10.3",
  "chacha20poly1305",
- "clap",
  "hkdf 0.12.4",
  "md-5",
  "rand 0.10.1",
  "sha1 0.10.6",
  "thiserror 2.0.18",
- "tokio",
  "tracing",
- "ts_cli_util",
  "ts_keys",
  "ts_packet",
  "ts_time",
- "tun-rs",
 ]
 
 [[package]]
@@ -6278,6 +6274,22 @@ version = "0.3.3"
 dependencies = [
  "ts_packet",
  "ts_transport",
+]
+
+[[package]]
+name = "ts_vpn"
+version = "0.3.3"
+dependencies = [
+ "clap",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "ts_packet",
+ "ts_tunnel",
+ "tun-rs",
 ]
 
 [[package]]
