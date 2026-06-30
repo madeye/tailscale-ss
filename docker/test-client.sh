@@ -1,44 +1,35 @@
 #!/bin/sh
-# Entry point for the client container in the E2E test.
+# Entry point for the client-under-test container.
 #
-# Brings up the tunnel client and then verifies real connectivity *through* the
-# encrypted tunnel by pinging the server's in-tunnel address (10.9.0.1). A
-# successful ping proves the full data path end to end:
+# Brings up a tsvpn-client (in the background, via run-client.sh) and then
+# verifies real connectivity *through* the encrypted tunnel by pinging the
+# server's in-tunnel address (10.9.0.1). A successful ping proves the full data
+# path end to end:
 #
-#   client kernel -> TUN -> Endpoint::send -> obfs(salt ++ AEAD) -> UDP -> server
-#   -> Endpoint::recv -> server TUN -> server kernel replies -> server TUN
-#   -> Endpoint::send -> UDP -> client -> Endpoint::recv -> TUN -> echo reply.
+#   client kernel -> TUN -> seal(salt ++ AEAD, obfs) -> UDP -> server
+#   -> open -> server TUN -> kernel reply -> ... -> back to this client.
 #
-# The client sends first (the ping), which is also how the server learns the
-# client's UDP address. The script exits 0 on success and non-zero on failure,
-# so the compose run can use `--exit-code-from client` as the test's verdict.
+# The client sends first (the ping), which is also how the server learns this
+# client's inner tunnel IP -> UDP address mapping. Exits 0 on success, non-zero
+# on failure, so compose `--exit-code-from` turns it into the test's verdict.
 set -eu
 
-SERVER_TUN_IP=10.9.0.1
+SERVER_TUN_IP="${SERVER_TUN_IP:-10.9.0.1}"
 PING_COUNT=5
 STARTUP_TIMEOUT=30
 
-echo "[client] starting tunnel_node (cipher=${CIPHER:-chacha20-poly1305} obfs=${OBFS:-quic})"
-tunnel_node \
-    --connect server:8388 \
-    --tun-name tun0 \
-    --tun-ip 10.9.0.2 \
-    --peer-ip 10.9.0.1 \
-    --password "${PASSWORD}" \
-    --cipher "${CIPHER:-chacha20-poly1305}" \
-    --obfs "${OBFS:-quic}" &
+echo "[client ${CLIENT_TUN_IP:-10.9.0.2}] starting tsvpn-client (cipher=${CIPHER:-chacha20-poly1305} obfs=${OBFS:-quic})"
+run-client.sh &
 CLIENT_PID=$!
 
-# Always tear the client down when this script exits.
 trap 'kill "$CLIENT_PID" 2>/dev/null || true' EXIT
 
-# Wait for the tunnel to carry a single round-trip, retrying to absorb the
-# server/client startup race. Bail out early if the client process has died.
+# Wait for the tunnel to carry a round-trip, retrying to absorb startup races.
 connected=0
 i=1
 while [ "$i" -le "$STARTUP_TIMEOUT" ]; do
     if ! kill -0 "$CLIENT_PID" 2>/dev/null; then
-        echo "[client] FAIL: tunnel_node exited during startup" >&2
+        echo "[client] FAIL: tsvpn-client exited during startup" >&2
         wait "$CLIENT_PID" || true
         exit 1
     fi
@@ -53,7 +44,6 @@ done
 
 if [ "$connected" -ne 1 ]; then
     echo "[client] FAIL: no reply from $SERVER_TUN_IP after ${STARTUP_TIMEOUT}s" >&2
-    echo "[client] --- tunnel interface ---" >&2
     ip addr show tun0 >&2 || true
     exit 1
 fi
@@ -61,7 +51,7 @@ fi
 # Stronger assertion: a short burst must all get through with 0% loss.
 echo "[client] tunnel is up; running ping burst to $SERVER_TUN_IP"
 if ping -c "$PING_COUNT" -i 0.3 -W 2 "$SERVER_TUN_IP"; then
-    echo "[client] PASS: end-to-end connectivity through the ts_tunnel ShadowVPN tunnel"
+    echo "[client] PASS: end-to-end connectivity through the tsvpn tunnel"
     exit 0
 fi
 

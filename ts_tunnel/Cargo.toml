@@ -36,18 +36,5 @@ thiserror.workspace = true
 # Logging.
 tracing.workspace = true
 
-[dev-dependencies]
-clap = { workspace = true, features = ["derive"] }
-tokio = { workspace = true, features = ["full", "macros"] }
-ts_cli_util.workspace = true
-# Cross-platform async TUN device for the `tunnel_node` example / Docker E2E test.
-tun-rs = { version = "2.8", features = ["async_tokio"] }
-
 [lints]
 workspace = true
-
-# The `tunnel_node` example is the data-mover used by the Docker E2E test; it is
-# not a library example and is only meaningful when run with TUN privileges.
-[[example]]
-name = "tunnel_node"
-path = "examples/tunnel_node.rs"

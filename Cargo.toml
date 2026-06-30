@@ -44,6 +44,7 @@ members = [
     "ts_transport_tun",
     "ts_underlay_router",
     "ts_tunnel",
+    "ts_vpn",
 ]
 
 [workspace.package]
@@ -103,6 +104,7 @@ thiserror = { version = "2", default-features = false }
 tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros"] }
 tokio-util = { version = "0.7", default-features = false }
 tracing = { version = "0.1", default-features = false, features = ["attributes"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-test = "0.2"
 url = { version = "2", default-features = false }
 x25519-dalek = { version = "3.0.0-pre.6", features = ["getrandom", "reusable_secrets", "static_secrets", "zeroize"] }
@@ -150,6 +152,7 @@ ts_transport = { path = "ts_transport", version = "0.3.3" }
 ts_transport_tun = { path = "ts_transport_tun", version = "0.3.3" }
 ts_underlay_router = { path = "ts_underlay_router", version = "0.3.3" }
 ts_tunnel = { path = "ts_tunnel", version = "0.3.3" }
+ts_vpn = { path = "ts_vpn", version = "0.3.3" }
 
 [workspace.lints.rust]
 closure_returning_async_block = "warn"

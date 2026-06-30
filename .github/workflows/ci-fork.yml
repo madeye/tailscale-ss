@@ -87,10 +87,15 @@ jobs:
 
       # Build the image once (first run), then exercise the tunnel across every
       # cipher and obfuscation mode; later runs reuse the cached image layers.
-      - name: End-to-end tunnel tests (all ciphers + obfs modes)
+      - name: Single-client end-to-end tests (all ciphers + obfs modes)
         run: |
           set -euo pipefail
           ./docker/run-e2e.sh chacha20-poly1305
           ./docker/run-e2e.sh aes-256-gcm
           OBFS=base64 ./docker/run-e2e.sh aes-128-gcm
           OBFS=none ./docker/run-e2e.sh chacha20-poly1305
+
+      - name: Multi-client end-to-end test (two simultaneous clients)
+        run: |
+          set -euo pipefail
+          ./docker/run-e2e-multi.sh chacha20-poly1305

@@ -1,0 +1,41 @@
+[package]
+name = "ts_vpn"
+version.workspace = true
+description = "ShadowVPN server and client binaries built on ts_tunnel"
+categories = ["network-programming", "command-line-utilities"]
+keywords = ["tailscale", "shadowvpn", "vpn", "tunnel", "udp"]
+
+repository.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Our crates: the tunnel protocol primitives and packet types.
+ts_tunnel.workspace = true
+ts_packet.workspace = true
+
+# Async runtime + cross-platform async TUN device.
+tokio = { workspace = true, features = ["full", "macros"] }
+tun-rs = { version = "2.8", features = ["async_tokio"] }
+
+# CLI + JSON config.
+clap = { workspace = true, features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+
+# Error handling + logging.
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[[bin]]
+name = "tsvpn-server"
+path = "src/bin/server.rs"
+
+[[bin]]
+name = "tsvpn-client"
+path = "src/bin/client.rs"
+
+[lints]
+workspace = true
